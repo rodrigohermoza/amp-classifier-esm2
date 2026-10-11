@@ -1,0 +1,42 @@
+# --- Datos: NO se versionan (licencias de APD3/DRAMP restringen redistribucion) ---
+data/raw/*
+data/interim/*
+data/processed/*
+!data/**/.gitkeep
+!data/**/README.md
+
+# Excepcion: los manifiestos SI se versionan (fuente, fecha, checksum)
+!data/raw/manifest*.json
+!data/processed/manifest*.json
+
+# --- Resultados pesados ---
+results/models/*
+!results/models/.gitkeep
+results/embeddings/
+*.pt
+*.npy
+*.npz
+
+# Las figuras y metricas SI se versionan (van en el README)
+!results/figures/*.png
+!results/metrics/*.json
+!results/metrics/*.csv
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Cache de modelos de HuggingFace si cae dentro del repo ---
+.cache/
+hf_cache/
+
+# --- macOS ---
+.DS_Store

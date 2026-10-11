@@ -144,9 +144,12 @@ class TestBuiltinClustering:
         assert mapping["cationic"] != mapping["acidic"]
 
     def test_all_sequences_receive_a_cluster(self):
-        seqs = {f"s{i}": seq for i, seq in enumerate(
-            ["GIGKFLHSAKKF", "GIGKFLHSAKKW", "DDDDEEEE", "WWWWWWWW", "KRKRKRKR"]
-        )}
+        seqs = {
+            f"s{i}": seq
+            for i, seq in enumerate(
+                ["GIGKFLHSAKKF", "GIGKFLHSAKKW", "DDDDEEEE", "WWWWWWWW", "KRKRKRKR"]
+            )
+        }
         mapping = cluster_builtin(seqs, identity=0.4, coverage=0.5)
         assert set(mapping) == set(seqs)
 

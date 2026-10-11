@@ -67,11 +67,19 @@ def cluster_mmseqs2(
         write_fasta(sequences, fasta)
 
         cmd = [
-            "mmseqs", "easy-cluster", str(fasta), str(prefix), str(tmpdir / "tmp"),
-            "--min-seq-id", str(identity),
-            "-c", str(coverage),
-            "--cov-mode", "1",
-            "-v", "1",
+            "mmseqs",
+            "easy-cluster",
+            str(fasta),
+            str(prefix),
+            str(tmpdir / "tmp"),
+            "--min-seq-id",
+            str(identity),
+            "-c",
+            str(coverage),
+            "--cov-mode",
+            "1",
+            "-v",
+            "1",
         ]
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=3600)
@@ -135,9 +143,23 @@ def cluster_cdhit(
         write_fasta(sequences, fasta)
 
         cmd = [
-            "cd-hit", "-i", str(fasta), "-o", str(out),
-            "-c", str(identity), "-n", str(word_size),
-            "-l", "4", "-aS", str(coverage), "-d", "0", "-M", "2000",
+            "cd-hit",
+            "-i",
+            str(fasta),
+            "-o",
+            str(out),
+            "-c",
+            str(identity),
+            "-n",
+            str(word_size),
+            "-l",
+            "4",
+            "-aS",
+            str(coverage),
+            "-d",
+            "0",
+            "-M",
+            "2000",
         ]
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=3600)
@@ -210,12 +232,10 @@ def identity_and_coverage(seq_a: str, seq_b: str, aligner) -> tuple[float, float
     shorter = min(len(seq_a), len(seq_b))
     matches = 0
     aligned_cols = 0
-    for (a_start, a_end), (b_start, b_end) in zip(*alignment.aligned):
+    for (a_start, a_end), (b_start, _b_end) in zip(*alignment.aligned):
         block = a_end - a_start
         aligned_cols += block
-        matches += sum(
-            1 for i in range(block) if seq_a[a_start + i] == seq_b[b_start + i]
-        )
+        matches += sum(1 for i in range(block) if seq_a[a_start + i] == seq_b[b_start + i])
 
     return matches / shorter, aligned_cols / shorter
 
@@ -293,9 +313,7 @@ def cluster_builtin(
 # --- Asignacion de clusteres a splits -------------------------------------
 
 
-def assign_splits(
-    df: pd.DataFrame, fractions: dict[str, float], seed: int
-) -> dict[int, str]:
+def assign_splits(df: pd.DataFrame, fractions: dict[str, float], seed: int) -> dict[int, str]:
     """Reparte clusteres completos entre train/val/test.
 
     Heuristica voraz: se recorren los clusteres de mayor a menor tamano y cada
@@ -474,9 +492,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             "n_clusters": int(sub.cluster_id.nunique()),
         }
 
-    SPLIT_REPORT_PATH.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    SPLIT_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[split] {report['n_clusters']} clusteres ({report['cluster_size']['singletons']} de 1)")
     print(f"[split] {report['mixed_label_clusters']} clusteres con ambas clases")

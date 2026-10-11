@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import roc_auc_score
 
 from ampesm.evaluate import (
     all_metrics,
@@ -109,7 +110,11 @@ class TestBootstrap:
         demasiado estrechos. Remuestrear clusteres completos respeta la
         dependencia y da intervalos mas anchos, que son los honestos.
         """
-        df = make_predictions(n_clusters=30, per_cluster=10)
+        # separation baja a proposito: con clases perfectamente separables el
+        # AUC es 1.0 en todo remuestreo y ambos intervalos tendrian ancho cero,
+        # con lo que el test no mediria nada.
+        df = make_predictions(n_clusters=30, per_cluster=10, separation=0.35, seed=5)
+        assert 0.6 < roc_auc_score(df.label, df.score) < 0.98, "los datos deben solaparse"
         by_cluster = bootstrap_metrics(df, 0.5, n_boot=300, unit="cluster", seed=42)
         by_sequence = bootstrap_metrics(df, 0.5, n_boot=300, unit="sequence", seed=42)
 
@@ -129,12 +134,12 @@ class TestBootstrap:
     def test_more_data_narrows_interval(self):
         small = make_predictions(n_clusters=20, per_cluster=5, seed=1)
         large = make_predictions(n_clusters=200, per_cluster=5, seed=1)
-        w_small = (
-            lambda r: r["roc_auc"]["ci_high"] - r["roc_auc"]["ci_low"]
-        )(bootstrap_metrics(small, 0.5, n_boot=200, seed=42))
-        w_large = (
-            lambda r: r["roc_auc"]["ci_high"] - r["roc_auc"]["ci_low"]
-        )(bootstrap_metrics(large, 0.5, n_boot=200, seed=42))
+        w_small = (lambda r: r["roc_auc"]["ci_high"] - r["roc_auc"]["ci_low"])(
+            bootstrap_metrics(small, 0.5, n_boot=200, seed=42)
+        )
+        w_large = (lambda r: r["roc_auc"]["ci_high"] - r["roc_auc"]["ci_low"])(
+            bootstrap_metrics(large, 0.5, n_boot=200, seed=42)
+        )
         assert w_large < w_small
 
 

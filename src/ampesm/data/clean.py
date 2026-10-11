@@ -164,9 +164,7 @@ def deduplicate(records: list[PeptideRecord]) -> tuple[list[PeptideRecord], dict
 # --- Emparejado de longitudes ----------------------------------------------
 
 
-def match_lengths(
-    df: pd.DataFrame, ratio: float | None, seed: int
-) -> tuple[pd.DataFrame, dict]:
+def match_lengths(df: pd.DataFrame, ratio: float | None, seed: int) -> tuple[pd.DataFrame, dict]:
     """Submuestrea negativos para imitar la distribucion de longitud positiva.
 
     Sin esto, el modelo aprende la longitud como atajo: si los negativos de
@@ -234,9 +232,7 @@ def build_dataset(keys: list[str] | None = None) -> pd.DataFrame:
     for src in sources:
         path = RAW_DIR / src.filename
         if not path.exists():
-            raise FileNotFoundError(
-                f"Falta {path}. Corre 'make data' o 'ampesm download' primero."
-            )
+            raise FileNotFoundError(f"Falta {path}. Corre 'make data' o 'ampesm download' primero.")
         recs, rep = parse_source(path, src)
         print(f"[limpieza] {src.key}: {rep['parsed']} registros parseados")
         if src.key == "apd3" and rep.get("dropped_empty") != 1:
@@ -300,9 +296,7 @@ def build_dataset(keys: list[str] | None = None) -> pd.DataFrame:
             "length_mean_negative": float(df[df.label == 0].length.mean()),
         },
     }
-    CLEAN_REPORT_PATH.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    CLEAN_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     f = report["final"]
     print(f"[limpieza] final: {f['n_total']} peptidos ({f['n_positive']}+ / {f['n_negative']}-)")

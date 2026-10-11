@@ -16,29 +16,77 @@ import numpy as np
 
 # Kyte & Doolittle (1982), hidropatia. Base del GRAVY.
 KYTE_DOOLITTLE = {
-    "A": 1.8, "R": -4.5, "N": -3.5, "D": -3.5, "C": 2.5,
-    "Q": -3.5, "E": -3.5, "G": -0.4, "H": -3.2, "I": 4.5,
-    "L": 3.8, "K": -3.9, "M": 1.9, "F": 2.8, "P": -1.6,
-    "S": -0.8, "T": -0.7, "W": -0.9, "Y": -1.3, "V": 4.2,
+    "A": 1.8,
+    "R": -4.5,
+    "N": -3.5,
+    "D": -3.5,
+    "C": 2.5,
+    "Q": -3.5,
+    "E": -3.5,
+    "G": -0.4,
+    "H": -3.2,
+    "I": 4.5,
+    "L": 3.8,
+    "K": -3.9,
+    "M": 1.9,
+    "F": 2.8,
+    "P": -1.6,
+    "S": -0.8,
+    "T": -0.7,
+    "W": -0.9,
+    "Y": -1.3,
+    "V": 4.2,
 }
 
 # Eisenberg et al. (1984), escala de hidrofobicidad consenso normalizada.
 # Se usa para el momento hidrofobico, que es el uso para el que se diseno.
 EISENBERG = {
-    "A": 0.62, "R": -2.53, "N": -0.78, "D": -0.90, "C": 0.29,
-    "Q": -0.85, "E": -0.74, "G": 0.48, "H": -0.40, "I": 1.38,
-    "L": 1.06, "K": -1.50, "M": 0.64, "F": 1.19, "P": 0.12,
-    "S": -0.18, "T": -0.05, "W": 0.81, "Y": 0.26, "V": 1.08,
+    "A": 0.62,
+    "R": -2.53,
+    "N": -0.78,
+    "D": -0.90,
+    "C": 0.29,
+    "Q": -0.85,
+    "E": -0.74,
+    "G": 0.48,
+    "H": -0.40,
+    "I": 1.38,
+    "L": 1.06,
+    "K": -1.50,
+    "M": 0.64,
+    "F": 1.19,
+    "P": 0.12,
+    "S": -0.18,
+    "T": -0.05,
+    "W": 0.81,
+    "Y": 0.26,
+    "V": 1.08,
 }
 
 # Energia libre de transferencia de agua a interfaz lipidica (kcal/mol), la
 # escala que se usa habitualmente para el indice de Boman. El indice se define
 # con signo invertido respecto a estos valores (ver boman_index).
 TRANSFER_FREE_ENERGY = {
-    "A": -0.17, "R": -0.81, "N": -0.42, "D": -1.23, "C": 0.24,
-    "Q": -0.58, "E": -2.02, "G": -0.01, "H": -0.96, "I": 0.31,
-    "L": 0.56, "K": -0.99, "M": 0.23, "F": 1.13, "P": -0.45,
-    "S": -0.13, "T": -0.14, "W": 1.85, "Y": 0.94, "V": -0.07,
+    "A": -0.17,
+    "R": -0.81,
+    "N": -0.42,
+    "D": -1.23,
+    "C": 0.24,
+    "Q": -0.58,
+    "E": -2.02,
+    "G": -0.01,
+    "H": -0.96,
+    "I": 0.31,
+    "L": 0.56,
+    "K": -0.99,
+    "M": 0.23,
+    "F": 1.13,
+    "P": -0.45,
+    "S": -0.13,
+    "T": -0.14,
+    "W": 1.85,
+    "Y": 0.94,
+    "V": -0.07,
 }
 
 # pKa de las cadenas laterales ionizables y de los extremos (valores tipo EMBOSS).

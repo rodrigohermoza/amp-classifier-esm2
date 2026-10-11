@@ -243,9 +243,11 @@ class TrainResult:
 
 
 def _split_masks(df: pd.DataFrame):
-    return (df.split == "train").to_numpy(), (df.split == "val").to_numpy(), (
-        df.split == "test"
-    ).to_numpy()
+    return (
+        (df.split == "train").to_numpy(),
+        (df.split == "val").to_numpy(),
+        (df.split == "test").to_numpy(),
+    )
 
 
 def train_one(
@@ -287,9 +289,7 @@ def train_one(
     assert best is not None  # expand_grid siempre devuelve al menos un combo
 
     fitted = best["fitted"]
-    all_scores = (
-        fitted(x) if model_kind == "mlp" else fitted.predict_proba(x)[:, 1]
-    )
+    all_scores = fitted(x) if model_kind == "mlp" else fitted.predict_proba(x)[:, 1]
 
     # El MCC en validacion se calcula con umbral 0.5, solo como referencia
     # rapida. El umbral de verdad se optimiza en evaluate.py, tambien sobre

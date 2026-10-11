@@ -55,7 +55,11 @@ def save_cache(path: Path, cache: dict[str, np.ndarray]) -> None:
     # Escritura atomica: un .npz truncado por una interrupcion seria peor que
     # ninguno, porque la siguiente corrida lo cargaria como valido.
     tmp = path.with_suffix(".npz.part")
-    np.savez_compressed(tmp, **cache)
+    # Se escribe sobre un descriptor abierto y no sobre la ruta: si se le pasa
+    # una ruta, numpy le anade ".npz" cuando no termina en esa extension, y el
+    # renombrado posterior apuntaria a un archivo que no existe.
+    with open(tmp, "wb") as fh:
+        np.savez_compressed(fh, **cache)
     tmp.replace(path)
 
 
@@ -156,10 +160,7 @@ def compute_embeddings(
             batch = {k: v.to(device) for k, v in batch.items()}
             out = model(**batch)
 
-            if layer == "last":
-                hidden = out.last_hidden_state
-            else:
-                hidden = out.hidden_states[int(layer)]
+            hidden = out.last_hidden_state if layer == "last" else out.hidden_states[int(layer)]
 
             if pooling == "mean":
                 pooled = masked_mean_pool(
@@ -205,7 +206,5 @@ def embedding_matrix(
     vector donde haga falta.
     """
     unique = dict(zip(df.seq_sha1, df.sequence))
-    vectors = compute_embeddings(
-        unique, model_name, layer, pooling, batch_size, device
-    )
+    vectors = compute_embeddings(unique, model_name, layer, pooling, batch_size, device)
     return np.vstack([vectors[h] for h in df.seq_sha1])

@@ -307,8 +307,13 @@ def plot_confusion(results: dict[str, pd.DataFrame], thresholds: dict[str, float
         for i in range(2):
             for j in range(2):
                 ax.text(
-                    j, i, f"{cm[i, j]:,}", ha="center", va="center",
-                    color="white" if cm[i, j] > cm.max() / 2 else "black", fontsize=9,
+                    j,
+                    i,
+                    f"{cm[i, j]:,}",
+                    ha="center",
+                    va="center",
+                    color="white" if cm[i, j] > cm.max() / 2 else "black",
+                    fontsize=9,
                 )
         ax.set_xticks([0, 1], ["no-AMP", "AMP"])
         ax.set_yticks([0, 1], ["no-AMP", "AMP"])
@@ -317,7 +322,7 @@ def plot_confusion(results: dict[str, pd.DataFrame], thresholds: dict[str, float
         ax.set_title(tag, fontsize=7)
         ax.grid(False)
 
-    for ax in axes.ravel()[len(tags):]:
+    for ax in axes.ravel()[len(tags) :]:
         ax.axis("off")
     fig.suptitle("Matrices de confusion en prueba", y=1.0)
     fig.savefig(FIGURES_DIR / "confusion_matrices.png")
@@ -396,9 +401,7 @@ def evaluate_all() -> pd.DataFrame:
             "threshold_metric": threshold_metric,
             f"val_{threshold_metric}": val_value,
             "metrics": metrics,
-            "confusion_matrix": {
-                "tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)
-            },
+            "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
             "n_test": int(len(test)),
             "n_clusters_test": int(test.cluster_id.nunique()),
             "bootstrap_n": n_boot,
@@ -433,9 +436,15 @@ def evaluate_all() -> pd.DataFrame:
         best_emb = summary[summary.tag.isin(emb_tags)].iloc[0].tag
         best_base = summary[summary.tag.isin(base_tags)].iloc[0].tag
         comparison = paired_difference(
-            test_frames[best_emb], test_frames[best_base],
-            thresholds[best_emb], thresholds[best_base],
-            metric=threshold_metric, n_boot=n_boot, unit=unit, ci=ci, seed=params.seed,
+            test_frames[best_emb],
+            test_frames[best_base],
+            thresholds[best_emb],
+            thresholds[best_base],
+            metric=threshold_metric,
+            n_boot=n_boot,
+            unit=unit,
+            ci=ci,
+            seed=params.seed,
         )
         comparison["model_a"] = best_emb
         comparison["model_b"] = best_base

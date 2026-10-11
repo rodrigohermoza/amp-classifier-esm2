@@ -132,11 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_source_args(p: argparse.ArgumentParser) -> None:
         p.add_argument(
-            "--sources", nargs="*", default=None,
+            "--sources",
+            nargs="*",
+            default=None,
             help="Claves de fuentes a usar (por defecto, todas).",
         )
         p.add_argument(
-            "--force", action="store_true",
+            "--force",
+            action="store_true",
             help="Volver a descargar aunque el archivo ya exista.",
         )
 
@@ -147,14 +150,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("data", help="Descargar, limpiar y escribir peptides.csv.")
     add_source_args(p)
     p.add_argument(
-        "--skip-download", action="store_true",
+        "--skip-download",
+        action="store_true",
         help="Usar los archivos que ya estan en data/raw.",
     )
     p.set_defaults(func=_cmd_data)
 
     p = sub.add_parser("split", help="Agrupar por identidad y dividir train/val/test.")
     p.add_argument(
-        "--method", choices=["mmseqs2", "cdhit", "builtin"], default=None,
+        "--method",
+        choices=["mmseqs2", "cdhit", "builtin"],
+        default=None,
         help="Forzar un metodo de clustering en vez de probarlos en cascada.",
     )
     p.set_defaults(func=_cmd_split)

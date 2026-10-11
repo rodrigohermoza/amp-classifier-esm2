@@ -43,7 +43,9 @@ def plot_length_distribution(df: pd.DataFrame) -> None:
 
     for source in sorted(df.source.unique()):
         sub = df[df.source == source]
-        axes[1].hist(sub.length, bins=bins, histtype="step", lw=1.5, label=f"{source} (n={len(sub)})")
+        axes[1].hist(
+            sub.length, bins=bins, histtype="step", lw=1.5, label=f"{source} (n={len(sub)})"
+        )
     axes[1].set_xlabel("Longitud (residuos)")
     axes[1].set_title("Longitud por fuente")
     axes[1].legend(fontsize=7)
@@ -267,7 +269,9 @@ def interpret_all(tag: str | None = None) -> None:
         else:
             available = sorted(p.stem for p in PREDICTIONS_DIR.glob("*.csv"))
             if not available:
-                raise FileNotFoundError("No hay predicciones; corre 'make baselines' y 'make train'")
+                raise FileNotFoundError(
+                    "No hay predicciones; corre 'make baselines' y 'make train'"
+                )
             tag = available[0]
 
     print(f"[interpret] modelo elegido: {tag}")

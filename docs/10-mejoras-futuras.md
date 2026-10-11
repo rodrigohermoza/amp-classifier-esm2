@@ -1,0 +1,87 @@
+# Mejoras futuras
+
+Ordenadas por relacion entre esfuerzo y valor. Las primeras son las que de verdad
+cambiarian las conclusiones; las ultimas son vistosas pero aportan poco.
+
+## Alto valor, bajo esfuerzo
+
+### M-01 — Curva de rendimiento frente al umbral de identidad
+Repetir todo con umbrales de 30%, 40%, 50%, 70% y 90%, y graficar ROC-AUC contra
+umbral. La curva descendente **es** la medida directa de cuanta fuga tenia la
+division aleatoria. Seria probablemente la figura mas instructiva del proyecto y
+cuesta poco: la tuberia ya esta parametrizada.
+
+### M-02 — Evaluacion cruzada por fuente
+Entrenar solo con APD3 y evaluar en los positivos de UniProt, y al reves. Si el
+rendimiento se cae, el modelo aprendio procedencia. Es la prueba mas directa del
+sesgo descrito en [01-objetivos.md](01-objetivos.md) y solo requiere reordenar los
+splits.
+
+### M-03 — Capas intermedias de ESM-2
+Probar la extraccion desde varias capas, no solo la ultima. Las ultimas capas se
+especializan en la tarea de enmascaramiento y a veces pierden informacion util.
+Cuesta una pasada por el modelo guardando todos los estados ocultos.
+
+## Alto valor, esfuerzo medio
+
+### M-04 — Recuperar DBAASP y hacer la regresion de MIC
+Ver [09-problemas-encontrados.md](09-problemas-encontrados.md), P-02, para las
+vias. Habilita la regresion, que es una tarea mas difícil y mas util que la
+clasificacion: predecir *cuanto* de potente, no solo *si*.
+
+### M-05 — Negativos mas duros
+Los negativos actuales son faciles. Alternativas:
+- Peptidos con actividad biologica conocida que **no** sea antimicrobiana
+  (hormonas, neuropeptidos, inhibidores de proteasas). Obliga al modelo a
+  distinguir "activo antimicrobiano" de "activo", no "activo" de "inerte".
+- Secuencias barajadas que conserven la composicion exacta de los positivos.
+  Elimina la composicion como atajo y mide si el modelo usa el **orden**. Esta
+  es, conceptualmente, la prueba mas afilada: si ESM-2 no supera a la composicion
+  con negativos barajados, no esta aportando nada sobre el orden de los residuos.
+
+### M-06 — Calibracion de probabilidades
+Platt scaling o regresion isotonica ajustada en validacion. Importa si el modelo
+se usara para priorizar candidatos: un ordenamiento sirve, pero una probabilidad
+calibrada permite decidir cuantos sintetizar.
+
+## Esfuerzo alto
+
+### M-07 — Fine-tuning de ESM-2
+Ajustar los pesos en vez de usarlo congelado. Es la extension con mas potencial
+de mejora y la que mas riesgo de sobreajuste tiene con unos pocos miles de
+ejemplos. Necesita GPU: Kaggle da ~30 h semanales de T4 gratis. Con LoRA sobre el
+modelo de 150M seria viable.
+
+### M-08 — Atencion por residuo para interpretacion
+Extraer pesos de atencion o gradientes por posicion para ver que residuos pesan
+en la prediccion. Atractivo visualmente, pero hay que tener cuidado: la atencion
+no es explicacion, y hay literatura abundante sobre ese malentendido. Como
+mucho, generaria hipotesis.
+
+### M-09 — Modelo multi-tarea con hemolisis y toxicidad
+Un AMP util tiene que matar al microbio sin matar celulas humanas. Predecir
+actividad y toxicidad juntas es mas parecido al problema real. Necesita otras
+bases de datos (HemoPI, ToxinPred) y multiplica el trabajo de curado.
+
+## El algoritmo genetico
+
+### M-10 — Reproducir la idea de Sup'Biotech, como experimento negativo
+Ver [08-decisiones.md](08-decisiones.md), D-10, para el encuadre completo.
+
+El valor no esta en generar secuencias: esta en **mostrar que optimizar contra un
+clasificador produce ejemplos adversarios**. Un algoritmo genetico con el
+clasificador como funcion de aptitud converge a secuencias con puntuacion de 0.99
+y propiedades absurdas, porque explota los puntos ciegos del modelo en vez de
+descubrir biologia.
+
+Lo que se reportaria:
+1. La trayectoria de aptitud subiendo mientras el realismo de las secuencias cae.
+2. Las mitigaciones probadas: penalizar la distancia a la distribucion de
+   entrenamiento, restringir la composicion a rangos observados, usar un comite
+   de modelos en vez de uno solo.
+3. La conclusion metodologica: un clasificador es un filtro, no una funcion
+   objetivo.
+
+Esto no produce candidatos para sintesis y no es el objetivo. Es una
+demostracion de los limites del metodo, que es lo que hace falta entender antes
+de que un diseno generativo signifique algo.

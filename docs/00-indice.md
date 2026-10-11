@@ -18,6 +18,7 @@ se hizo asi, y **que salio mal** en el camino.
 | [10-mejoras-futuras.md](10-mejoras-futuras.md) | Lo que falta, ordenado por relacion esfuerzo/beneficio |
 | [11-agentes.md](11-agentes.md) | Uso de agentes de IA: funcion, trabajo hecho, tokens y tiempo |
 | [12-glosario.md](12-glosario.md) | Terminos de biologia para lectores de ML y viceversa |
+| [13-portafolio.md](13-portafolio.md) | Borrador del texto para rodrigohermoza.pages.dev, segun la guia de historias |
 
 ## Como leer esto segun quien eres
 

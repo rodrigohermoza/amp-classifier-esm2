@@ -69,6 +69,75 @@ Vale la pena separarlo porque es donde un lector esceptico mirara:
 
 ---
 
+## Sesion 2 — 2026-10-11 · Auditoria por agentes
+
+Primera vez que se delegan subtareas. El motivo: el codigo estaba escrito
+completo pero sin ejecutar, y revisar tu propio codigo recien escrito tiene un
+punto ciego conocido — se verifica lo que se penso al escribirlo, no lo que se
+dio por supuesto.
+
+### Agentes lanzados
+
+| Agente | Funcion | Que hizo | Tokens | Tiempo | Herramientas |
+|---|---|---|---|---|---|
+| Auditoria metodologica | Validez estadistica: fuga, seleccion de modelo, bootstrap, correccion numerica de los descriptores | Leyo docs/02, 04 y 07 y comparo la intencion declarada contra el codigo. Midio el prefiltro de k-meros con pares sinteticos, ejecuto `assign_splits` con distribuciones adversas, comparo las escalas fisicoquimicas residuo a residuo contra las publicadas | 152 454 | 9 min 51 s | 24 llamadas |
+| Auditoria de robustez | Fallos que apareceran en la primera corrida real | Copio `src/` al scratchpad y **ejecuto de verdad** `split → baselines → evaluate → interpret` con 368 peptidos sinteticos. Construyo un `EsmModel` local desde config para probar los embeddings sin red. Midio el clustering con hasta 16 000 secuencias y lo perfilo con cProfile | 161 569 | 12 min 46 s | 38 llamadas |
+| **Total** | | | **314 023** | **22 min 37 s** (en paralelo) | 62 |
+
+Ambos corrieron en paralelo y en modo solo lectura: ninguno modifico un archivo
+del proyecto. Trabajaron sobre copias en un directorio temporal.
+
+### Que encontraron
+
+12 hallazgos, registrados como P-03 a P-11 en
+[09-problemas-encontrados.md](09-problemas-encontrados.md). Los dos criticos:
+
+1. **El prefiltro de k-meros anulaba el umbral de identidad del 40%** (P-03). El
+   umbral efectivo era ~0.75. Es la fuga de datos que todo el diseno del proyecto
+   existe para evitar. **Los dos agentes lo encontraron de forma independiente**,
+   con metodologias distintas y numeros que coinciden, lo que sube mucho la
+   confianza en que es real y no un artefacto de un analisis.
+2. **El modelo de la comparacion principal se elegia por su resultado en test**
+   (P-05), contradiciendo dos compromisos escritos en este mismo repositorio.
+
+Tambien confirmaron explicitamente que varias cosas estan bien, lo cual tiene
+valor propio: no hay fuga por escalado, `paired_difference` si usa los mismos
+remuestreos para ambos modelos, la agregacion enmascarada de ESM-2 es correcta
+(diferencia individual-vs-lote de 4,8e-07), ninguna columna de procedencia entra
+como feature, y el contrato de columnas entre etapas se cumple en una corrida
+real de punta a punta.
+
+Y una preocupacion resulto infundada (P-11): se temia que el clustering en
+Python puro fuera inviable; son **26 segundos** para 16 000 peptidos.
+
+### Coste total de la sesion
+
+| Metrica | Valor |
+|---|---|
+| Tokens de los agentes | 314 023 |
+| Tokens de la conversacion principal | 269 161 (27% de una ventana de 1 M) |
+| Modelo | Claude Opus 5 |
+| Tiempo de reloj de la sesion | ~2 h |
+
+### Valoracion del uso de agentes
+
+Merecio la pena, y se puede decir por que con precision: los dos hallazgos
+criticos eran invisibles desde dentro. P-03 no lo detecta ningun test porque el
+test verifica el invariante correcto en el eslabon equivocado; P-05 requiere
+cruzar lo que dice la documentacion con lo que hace el codigo, que es
+exactamente lo que no haces cuando escribiste los dos.
+
+El patron que funciono: **dar a cada agente una hipotesis que contrastar y
+permiso para ejecutar**, no "revisa este codigo". El segundo agente encontro el
+fallo de XGBoost (P-09) porque intento correr la etapa de verdad; una lectura del
+codigo no lo habria visto nunca, porque el codigo es correcto y lo que falta es
+una biblioteca del sistema.
+
+Lo que **no** se delego, y a proposito: las decisiones. Los agentes informan,
+proponen correcciones y las ordenan por prioridad; que se arregla, en que orden y
+que se documenta como limitacion conocida se decide en la conversacion principal,
+con el autor del proyecto.
+
 ## Plantilla para sesiones nuevas
 
 ```

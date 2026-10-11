@@ -1,0 +1,78 @@
+# Parametros de la tuberia. Todo lo ajustable vive aqui para que quede a la vista
+# y para que un cambio de configuracion aparezca en el diff de git.
+
+seed: 42
+
+data:
+  min_length: 5
+  max_length: 50
+  # Si se emparejan las longitudes de los negativos con la distribucion de los
+  # positivos. Desactivarlo deja que el modelo use la longitud como atajo.
+  match_negative_lengths: true
+  # Negativos por cada positivo despues del emparejado. null = usar todos.
+  negative_ratio: 3.0
+
+split:
+  identity_threshold: 0.4
+  # Cobertura minima del alineamiento sobre la secuencia mas corta.
+  min_coverage: 0.5
+  fractions:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+  # Orden de preferencia de herramientas: la primera disponible se usa.
+  methods: [mmseqs2, cdhit, builtin]
+  builtin:
+    # Jaccard minimo de 3-meros para que dos secuencias se alineen.
+    # Mas alto = mas rapido y mas falsos negativos de agrupacion.
+    kmer_size: 3
+    kmer_jaccard_prefilter: 0.15
+
+features:
+  physchem_ph: 7.4
+  # Ventana para el momento hidrofobico y angulo de la helice alfa.
+  moment_window: 11
+  moment_angle_deg: 100.0
+
+embeddings:
+  models:
+    - facebook/esm2_t6_8M_UR50D
+    - facebook/esm2_t12_35M_UR50D
+  # "last" o un indice de capa (0 = embeddings de entrada).
+  layer: last
+  pooling: mean          # mean | mean_max
+  batch_size: 16
+  device: cpu
+
+models:
+  logreg:
+    C: [0.01, 0.1, 1.0, 10.0]
+    max_iter: 5000
+  random_forest:
+    n_estimators: [300]
+    max_depth: [null, 10, 20]
+    min_samples_leaf: [1, 3]
+  xgboost:
+    n_estimators: [300]
+    max_depth: [3, 6]
+    learning_rate: [0.05, 0.1]
+    subsample: [0.8]
+  mlp:
+    hidden_sizes: [[256], [256, 64]]
+    dropout: [0.3]
+    lr: [0.001]
+    epochs: 60
+    batch_size: 32
+    patience: 10
+
+evaluate:
+  bootstrap_n: 2000
+  bootstrap_unit: cluster   # cluster | sequence
+  ci: 0.95
+  threshold_metric: mcc     # metrica que se maximiza en val para fijar el umbral
+
+interpret:
+  umap:
+    n_neighbors: 15
+    min_dist: 0.1
+    metric: euclidean

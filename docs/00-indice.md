@@ -20,15 +20,26 @@ se hizo asi, y **que salio mal** en el camino.
 | [12-glosario.md](12-glosario.md) | Terminos de biologia para lectores de ML y viceversa |
 | [13-portafolio.md](13-portafolio.md) | Borrador del texto para rodrigohermoza.pages.dev, segun la guia de historias |
 | [14-estado-y-continuacion.md](14-estado-y-continuacion.md) | **Empieza aqui para retomar**: que esta hecho, que falta, que decidir |
+| [15-explicacion-simple.md](15-explicacion-simple.md) | **El proyecto entero explicado sin jerga**, de principio a fin |
+| [16-explicacion-tecnica.md](16-explicacion-tecnica.md) | **El proyecto entero en tecnico**: formulas, modulos, artefactos y el por que de cada eleccion |
 
 ## Si vuelves al proyecto despues de un tiempo
 
 Empieza por [14-estado-y-continuacion.md](14-estado-y-continuacion.md).
 
+## Si quieres entender el proyecto completo de una sentada
+
+[15-explicacion-simple.md](15-explicacion-simple.md) sin jerga, o
+[16-explicacion-tecnica.md](16-explicacion-tecnica.md) con formulas y nombres de
+funcion. Los dos cubren las siete etapas; los archivos 01-13 son la referencia
+por tema.
+
 ## Como leer esto segun quien eres
 
 - **Reclutador o comite de admision**: el [README](../README.md) y luego
   [07-evaluacion.md](07-evaluacion.md).
+- **Alguien que no viene de bioinformatica**:
+  [15-explicacion-simple.md](15-explicacion-simple.md).
 - **Alguien que quiere reproducir el trabajo**: [02-arquitectura.md](02-arquitectura.md)
   y [03-datos-fuentes.md](03-datos-fuentes.md).
 - **Alguien que quiere criticar el metodo**: [04-division-clusters.md](04-division-clusters.md)

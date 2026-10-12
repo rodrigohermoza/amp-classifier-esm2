@@ -256,3 +256,58 @@ deteccion, ademas de exigir que no haya falsos positivos sin fuga.
 anade un detector de desbalance, de sesgo por fuente o de deriva de
 distribucion, tiene que venir con su caso positivo. Un control que no puede
 fallar no es evidencia.
+
+---
+
+## D-16 — La longitud se trata con una ablacion, no emparejando por split
+**Fecha:** 2026-10-11
+
+La primera corrida real de `data` dio el numero que faltaba para decidir esto:
+los positivos miden **22.9 residuos de media y los negativos 30.6**, y el
+`deficit` del emparejado de longitudes es **23 732**. Ese deficit es el numero
+de negativos que el emparejado habria querido en alguna longitud concreta y no
+existian en la fuente. Es decir: **el emparejado de longitudes no puede
+funcionar aqui**, no porque este mal implementado, sino porque UniProt no
+contiene suficientes peptidos cortos revisados. La longitud va a ser un atajo
+disponible para el modelo, y hay que decidir que se hace al respecto.
+
+Las dos opciones eran emparejar las longitudes **dentro de cada split** o
+publicar una **ablacion** del baseline sin los descriptores que dependen de la
+longitud.
+
+**Decision: la ablacion.** Se anade la representacion `comp_physchem_nolen`,
+que es el mismo baseline de 31 features sin `length` ni `charge_density` (29
+features), y entra en `run_baselines` como cuarta representacion, asi que se
+entrena y se reporta siempre, no solo si el KS sale mal.
+
+**Por que, en orden de peso:**
+
+1. **Emparejar por split obliga a descartar datos despues de ver el
+   estadistico.** Los clusteres son atomicos: no se puede elegir que secuencia
+   va a que split, asi que emparejar dentro de cada split significa tirar
+   secuencias una vez hecha la division. Y hacerlo solo cuando el KS sale bajo
+   convierte una decision de diseno en un filtro guiado por un test, que es la
+   misma clase de error que P-05: elegir el procesamiento en funcion del
+   resultado. Con un `deficit` de 23 732 el recorte no seria menor.
+2. **La ablacion anade informacion en vez de quitar datos.** Da dos numeros en
+   vez de uno: cuanto rinde el baseline con la longitud y cuanto sin ella. La
+   diferencia entre ambos **es** la medida de cuanto del baseline era longitud,
+   que es justo lo que se queria saber.
+3. **Encaja con el objetivo del proyecto**, que es comparar representaciones y
+   no maximizar una metrica. Un baseline mas debil por la ablacion no invalida
+   la comparacion; la aclara.
+
+**La asimetria que hay que declarar, y se declara:** la ablacion quita la
+longitud al **baseline**, no a ESM-2. Los embeddings con pooling por media
+atenuan la longitud pero no la eliminan, asi que `comp_physchem_nolen` vs
+ESM-2 es una comparacion sesgada **a favor de ESM-2**. Por eso la comparacion
+preregistrada sigue siendo contra `comp_physchem` completo (D-12, sin cambios)
+y la ablacion se reporta al lado como lectura del confusor, nunca como el
+baseline principal. Leerla al reves seria inflar el resultado.
+
+**Lo que queda pendiente de esto:** el KS por split sigue reportandose y sigue
+siendo util, pero ya no es el que dispara la decision, porque la decision esta
+tomada de antemano. Y si se quisiera cerrar la asimetria de arriba haria falta
+un control de longitud del lado de los embeddings (por ejemplo residualizar
+cada dimension contra la longitud), que esta en
+[10-mejoras-futuras.md](10-mejoras-futuras.md) y no en esta version.

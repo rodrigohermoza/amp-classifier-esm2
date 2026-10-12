@@ -42,6 +42,13 @@ class ModelUnavailable(RuntimeError):
 
 # --- Representaciones ------------------------------------------------------
 
+# Descriptores que dependen de la longitud y por tanto pueden actuar de atajo:
+# los negativos de UniProt son en promedio 7.8 residuos mas largos que los
+# positivos, y el emparejado de longitudes no puede corregirlo porque no existen
+# negativos cortos suficientes en la fuente (D-16). La representacion
+# `comp_physchem_nolen` es el mismo baseline sin estos dos.
+LENGTH_PROXY_FEATURES = frozenset({"length", "charge_density"})
+
 
 def get_feature_matrix(
     df: pd.DataFrame, representation: str, params
@@ -61,14 +68,25 @@ def get_feature_matrix(
         return composition.composition_matrix(sequences), composition.FEATURE_NAMES
     if representation == "physchem":
         return physchem.physchem_matrix(sequences, ph, window, angle), physchem.FEATURE_NAMES
-    if representation == "comp_physchem":
+    if representation in ("comp_physchem", "comp_physchem_nolen"):
         x = np.hstack(
             [
                 composition.composition_matrix(sequences),
                 physchem.physchem_matrix(sequences, ph, window, angle),
             ]
         )
-        return x, composition.FEATURE_NAMES + physchem.FEATURE_NAMES
+        names = composition.FEATURE_NAMES + physchem.FEATURE_NAMES
+        if representation == "comp_physchem_nolen":
+            keep = [i for i, n in enumerate(names) if n not in LENGTH_PROXY_FEATURES]
+            missing = LENGTH_PROXY_FEATURES - set(names)
+            if missing:
+                raise ValueError(
+                    f"La ablacion espera descriptores que ya no existen: {sorted(missing)}. "
+                    "Si se renombraron, hay que actualizar LENGTH_PROXY_FEATURES."
+                )
+            x = x[:, keep]
+            names = [names[i] for i in keep]
+        return x, names
 
     # Cualquier otra cosa se interpreta como un modelo de ESM-2.
     ecfg = params.embeddings
@@ -363,14 +381,14 @@ def load_splits() -> pd.DataFrame:
 
 
 def run_baselines() -> list[TrainResult]:
-    """Entrena los baselines tabulares: 3 representaciones x 3 modelos."""
+    """Entrena los baselines tabulares: 4 representaciones x 3 modelos."""
     ensure_dirs()
     params = load_params()
     df = load_splits()
     results = []
     unavailable: set[str] = set()
 
-    for representation in ("composition", "physchem", "comp_physchem"):
+    for representation in ("composition", "physchem", "comp_physchem", "comp_physchem_nolen"):
         x, _names = get_feature_matrix(df, representation, params)
         print(f"[baselines] {representation}: matriz {x.shape}")
         for model_kind in ("logreg", "random_forest", "xgboost"):

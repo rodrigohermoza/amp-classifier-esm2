@@ -200,3 +200,31 @@ class TestIsoelectricPointBounds:
         assert (
             abs(physchem.net_charge("R" * 40, pi)) < 0.01
         ), "si devuelve el borde del intervalo en vez del pI, la carga no sera cero"
+
+
+class TestLengthAblation:
+    """D-16: el baseline sin proxies de longitud tiene que no tenerlos.
+
+    La ablacion existe porque los negativos son 7.8 residuos mas largos de
+    media y el emparejado no puede corregirlo. Si un renombrado dejara
+    `length` dentro, la ablacion seguiria corriendo y no ablacionaria nada.
+    """
+
+    def test_ablation_drops_exactly_the_length_proxies(self):
+        import pandas as pd
+
+        from ampesm.config import load_params
+        from ampesm.models import LENGTH_PROXY_FEATURES, get_feature_matrix
+
+        df = pd.DataFrame({"sequence": [MAGAININ_2, LL37]})
+        params = load_params()
+
+        full, full_names = get_feature_matrix(df, "comp_physchem", params)
+        abl, abl_names = get_feature_matrix(df, "comp_physchem_nolen", params)
+
+        assert set(full_names) >= LENGTH_PROXY_FEATURES
+        assert not (LENGTH_PROXY_FEATURES & set(abl_names))
+        assert abl.shape[1] == full.shape[1] - len(LENGTH_PROXY_FEATURES)
+        # El resto de columnas no se reordena ni se altera.
+        keep = [i for i, n in enumerate(full_names) if n not in LENGTH_PROXY_FEATURES]
+        assert np.allclose(abl, full[:, keep], equal_nan=True)

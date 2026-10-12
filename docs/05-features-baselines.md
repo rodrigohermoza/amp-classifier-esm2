@@ -73,6 +73,24 @@ secuencia que globalmente no lo es.
 
 La combinacion. Es el baseline principal contra el que se compara ESM-2.
 
+## Conjunto D: C sin los proxies de longitud (29 features)
+
+`comp_physchem_nolen`: el conjunto C sin `length` ni `charge_density`.
+
+Existe porque la corrida real puso numero al confusor: los positivos miden 22.9
+residuos de media y los negativos 30.6, y al emparejado de longitudes le
+faltaron 23 732 negativos cortos que **no existen** en UniProt. Es decir, la
+longitud es un atajo disponible y no se puede quitar de los datos.
+
+La diferencia entre el conjunto C y el D **es** la medida de cuanto del baseline
+era longitud. Se entrena siempre, no solo si el KS de longitud sale mal, para
+que no sea una decision tomada despues de ver el estadistico.
+
+Advertencia que no hay que perder de vista: la ablacion quita la longitud al
+**baseline** y no a ESM-2, asi que leerla como "baseline limpio vs ESM-2" infla
+a ESM-2. La comparacion preregistrada sigue siendo contra el conjunto C
+completo. Razonamiento en [08-decisiones.md](08-decisiones.md), D-16.
+
 ## Modelos
 
 | Modelo | Por que esta |

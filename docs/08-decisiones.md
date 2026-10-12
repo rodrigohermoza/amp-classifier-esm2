@@ -198,7 +198,7 @@ validacion. El JSON de salida incluye `selected_on`.
 
 **Consecuencia que conviene asumir:** si otro modelo resulta mejor en test, la
 comparacion preregistrada seguira usando el par fijado. Eso es correcto, no una
-limitacion: la tabla con los 13 modelos queda como material descriptivo y la
+limitacion: la tabla con los 16 modelos queda como material descriptivo y la
 unica inferencia del proyecto es la comparacion preregistrada. El README lo
 dice.
 

@@ -65,11 +65,21 @@ base de datos, hay un problema), y dejar el punto escrito en el README.
 ## Fuera de alcance
 
 - Predecir estructura tridimensional.
-- Predecir toxicidad o hemolisis (es una tarea aparte, con sus propias bases).
-- Proponer peptidos nuevos para sintesis. El paso opcional del algoritmo genetico
-  existe para **mostrar que un clasificador es un mal criterio de optimizacion
-  por si solo**, no para producir una lista de candidatos. Ver
-  [10-mejoras-futuras.md](10-mejoras-futuras.md).
+- Predecir la MIC (regresion de potencia). Diferida, ver D-07. La via viable
+  ya no es recuperar DBAASP sino parsear los MIC que DRAMP trae en 5 020 de
+  sus filas (P-02).
+- **Producir una lista de candidatos para sintetizar.** Esto merece precision,
+  porque el proyecto va a tener una fase de generacion y la frontera es justo
+  aqui: se generan peptidos, pero el resultado declarado es **cuanto engaña el
+  generador al clasificador**, no una lista de candidatos. Un clasificador es
+  un mal criterio de optimizacion por si solo, y demostrarlo con numeros es el
+  objetivo. Diseño completo en
+  [17-diseno-generacion.md](17-diseno-generacion.md) y encuadre en D-17.
+- Predecir hemolisis **como objetivo propio**. Entra en la fase 2 solo como
+  penalizador aproximado del generador, construido con la columna
+  `Hemolytic_activity` de DRAMP (informacion real en 5 818 filas), y con la
+  misma advertencia que los negativos: las filas sin dato son ausencia de
+  informacion, no ausencia de hemolisis.
 
 ## Contexto personal
 
@@ -78,3 +88,7 @@ un algoritmo genetico ([repositorio del
 equipo](https://github.com/hgrandjean/Anti-Fungi-Peptide)). Mi aporte fue la
 obtencion de datos de DRAMP y UniProt. Este proyecto es mi propia version, donde
 la parte de aprendizaje automatico es trabajo mio de principio a fin.
+
+Con la fase 2 el arco se cierra: en 2023 di los datos para que el generador de
+otros puntuara candidatos; al terminar, el oraculo, el generador y **la critica
+del generador** son mios.

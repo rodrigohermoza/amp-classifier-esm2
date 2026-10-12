@@ -40,11 +40,11 @@ artefacto intermedio sea inspeccionable.
 | `ampesm/data/download.py` | Descarga con reintentos, calcula sha256, escribe el manifiesto | Parsear |
 | `ampesm/data/parse.py` | FASTA y XLSX -> lista de `PeptideRecord` | Filtrar |
 | `ampesm/data/clean.py` | Filtros de alfabeto y longitud, deduplicado, emparejado de longitud | Descargar |
-| `ampesm/split.py` | Clustering por identidad y asignacion de clusteres a train/val/test | Entrenar |
+| `ampesm/split.py` | Clustering por identidad, asignacion de clusteres a train/val/test y las auditorias de fuga | Entrenar |
 | `ampesm/features/composition.py` | Frecuencia de los 20 aminoacidos | Fisicoquimica |
 | `ampesm/features/physchem.py` | Carga neta, GRAVY, momento hidrofobico, pI, aromaticidad | Composicion |
 | `ampesm/embeddings.py` | Carga ESM-2, agrega por media de residuos, cachea en disco | Clasificar |
-| `ampesm/models.py` | Definicion y ajuste de LR / RF / XGBoost / MLP | Metricas |
+| `ampesm/models.py` | Definicion y ajuste de LR / RF / XGBoost / MLP, y las 4 representaciones tabulares | Metricas |
 | `ampesm/evaluate.py` | Metricas, bootstrap, curvas, matriz de confusion | Entrenar |
 | `ampesm/interpret.py` | UMAP, analisis de errores | Metricas |
 | `ampesm/cli.py` | Un subcomando por etapa | Todo lo demas |
@@ -86,6 +86,45 @@ Tres razones concretas:
 **Invariante critico:** ningun `cluster_id` aparece en mas de un `split`. Hay un
 test que lo verifica (`tests/test_split.py`). Si ese test falla, todas las
 metricas del proyecto son invalidas.
+
+`results/models/*.json`, por modelo entrenado:
+
+| campo | descripcion |
+|---|---|
+| `tag` | `{representacion}__{modelo}`, la clave que cruza con las predicciones |
+| `representation` | `composition`, `physchem`, `comp_physchem`, `comp_physchem_nolen` o un modelo de ESM-2 |
+| `best_params` | hiperparametros elegidos **en validacion** |
+| `val_roc_auc` | lo que usan `interpret` y el fallback de `evaluate` para elegir modelo |
+| `features_hash` | huella de la seccion `features` de `params.yaml` con la que se entreno (P-24) |
+
+## Guardas y diagnosticos por etapa
+
+Esta tabla existe porque la mitad del codigo del proyecto no calcula nada: vigila
+que lo calculado signifique algo. Cada guarda nacio de un fallo real que no se
+veia.
+
+| Etapa | Guarda | Que pasa si salta | Origen |
+|---|---|---|---|
+| todas (via `make`) | `check-env`: el paquete se importa | aborta con el comando de arreglo | P-25 |
+| `data` | cabeceras vacias de APD3 != 1 | aviso: el formato de origen cambio | P-01 |
+| `data` | conjunto vacio o de una sola clase | aborta | — |
+| `split` | ningun cluster en dos splits | aborta, no escribe nada | invariante |
+| `split` | split degenerado (falta una clase, <20 positivos, <10 clusteres) | aborta | P-06 |
+| `split` | `leakage.global_p_value` en test **y en val** | aviso ruidoso | P-04, P-27 |
+| `split` | `positive_rate_drift` entre splits | aviso | P-26 |
+| `split` | `length_ks_pvalue` por split | diagnostico, se reporta | P-10 |
+| `split` | `publishable: false` si se uso el respaldo | aviso ruidoso | D-11, P-03 |
+| `split` | borra `predictions/*.csv` rancias | silencioso, a proposito | P-20 |
+| `baselines` | XGBoost no disponible (`libomp`) | aviso y sigue sin el | P-09 |
+| `evaluate` | ids de predicciones contra `splits.csv` | aborta | P-20 |
+| `evaluate` | validacion vacia o de una clase en `choose_threshold` | aborta | P-07 |
+| `evaluate` | `n_boot_valid / n_boot_requested` < 99% | aviso | P-16 |
+| `evaluate` | no-finitos a `null`, `allow_nan=False` | aborta si quedara un NaN | P-21 |
+| `interpret` | `features_hash` distinto del guardado | **aborta** | P-24, D-18 |
+
+El criterio de cuando abortar y cuando avisar esta en D-18: abortar cuando la
+salida es un artefacto que viaja solo (una figura, un JSON), avisar cuando el
+numero sigue siendo util si se conoce el problema.
 
 ## Reproducibilidad
 

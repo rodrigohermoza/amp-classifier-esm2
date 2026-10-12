@@ -239,6 +239,24 @@ revise".
 ### Decisiones de la persona
 ```
 
+## Sesion del 2026-10-11 (tarde): sin agentes
+
+Se registra la ausencia porque el criterio importa tanto como las estadisticas.
+En esa sesion se publico el repositorio, se corrio `data` por primera vez, se
+hicieron los cuatro arreglos previos a la tuberia (P-24 a P-27) y se diseño la
+fase 2. **No se lanzo ningun agente**, y fue deliberado.
+
+Razon: los agentes rindieron cuando se les pidio **buscar fallos en codigo ya
+escrito**, con un objetivo estrecho y verificable ("busca fallos introducidos
+por los arreglos anteriores"). Las tareas de esa sesion eran de otra clase:
+decisiones de diseño con criterios en conflicto (D-16, D-17, D-18), ejecucion
+de una etapa y lectura de su reporte, y escritura de documentacion que depende
+del contexto completo del proyecto. Un agente lanzado a eso habria devuelto
+texto plausible que luego habria que verificar entero, que es mas trabajo que
+hacerlo.
+
+La regla que queda: **agentes para auditar, no para decidir.**
+
 ## Politica para este proyecto
 
 1. Se declara el uso de IA. No se oculta y no se exagera.

@@ -121,3 +121,20 @@ espacio original.
 con alta confianza. Es lo que produce un algoritmo genetico que optimiza contra un
 clasificador, y la razon por la que un clasificador es un filtro y no una funcion
 objetivo.
+
+
+## Terminos de la fase de generacion
+
+Ver [17-diseno-generacion.md](17-diseno-generacion.md).
+
+| Termino | Que es |
+|---|---|
+| **Funcion de aptitud** (*fitness*) | Lo que un algoritmo evolutivo maximiza. Aqui es la puntuacion del clasificador menos las penalizaciones. Elegirla mal es el fallo central de esta clase de metodos. |
+| **Ataque adversarial** | Buscar la entrada que maximiza la salida de un modelo. Es lo mismo que "optimizar contra el clasificador": tecnicamente identico, solo cambia la intencion declarada. |
+| **Ley de Goodhart** | Una metrica usada como objetivo deja de ser una metrica. La version concreta aqui: un clasificador usado como funcion de aptitud deja de medir actividad antimicrobiana. |
+| **Oraculo** | El modelo que puntua candidatos. En la fase 2 hay dos: uno que el generador ve y optimiza, y uno independiente que solo evalua. La brecha entre ambos es la medida del engaño. |
+| **Modelo de lenguaje enmascarado** (*MLM*) | La tarea con la que se entreno ESM-2: tapar un residuo y predecirlo. En la fase 2 se usa para proponer mutaciones plausibles en vez de aleatorias. |
+| **Hemolisis** | Rotura de globulos rojos. Es el proxy habitual de toxicidad de un AMP: un peptido que rompe membranas bacterianas y tambien las tuyas no sirve como farmaco. |
+| **HD50** | Concentracion a la que un peptido lisa el 50% de los globulos rojos. Es a la hemolisis lo que la MIC es a la actividad. |
+| **Poli-arginina** | `RRRRRR...`. El optimo degenerado al que converge un generador ingenuo: puntuacion altisima, toxicidad real, cero utilidad. |
+| **Control positivo** | Un caso donde se sabe que el efecto existe, usado para comprobar que el metodo lo encuentra. Es la regla D-15 del proyecto, y en la fase 2 es esconder una familia de AMPs reales y exigir que el generador la redescubra. |

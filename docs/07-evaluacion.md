@@ -107,13 +107,47 @@ reporta.
 Y `results/metrics/summary.csv` junta todo en una tabla, que es lo que se pega en
 el README.
 
+## Tres cosas que hay que leer antes que la tabla de metricas
+
+Las metricas no se interpretan solas. Antes de mirar `summary.csv` conviene
+abrir `split_report.json` y comprobar tres campos, porque los tres pueden
+invalidar o reencuadrar la tabla entera:
+
+1. **`train_test_identity_audit.leakage.global_p_value` y el de
+   `train_val_identity_audit`.** El segundo importa tanto como el primero y es
+   menos obvio: `val` fija el umbral que se aplica a `test`, asi que homologia
+   val-train sesga cinco de las siete metricas **aunque test este limpio**
+   (P-27). Y en los dos casos el numero que se lee es el p-valor y el exceso,
+   nunca `fraction_over_threshold`.
+2. **`positive_rate_drift.exceeds_tolerance`.** Si es `true`, PR-AUC, F1 y
+   precision **no son comparables entre splits** porque dependen de la
+   prevalencia, y el umbral elegido en `val` esta descalibrado para `test`
+   (P-26).
+3. **`publishable`.** Si es `false` se uso el respaldo de clustering en Python
+   y los numeros no son publicables (D-11).
+
+## La ablacion de longitud, y como no leerla al reves
+
+La tabla incluye `comp_physchem_nolen`: el baseline sin `length` ni
+`charge_density`. Existe porque los positivos miden 22.9 residuos de media y
+los negativos 30.6, y el emparejado de longitudes no puede corregirlo (D-16).
+
+**La diferencia entre `comp_physchem` y `comp_physchem_nolen` es la medida de
+cuanto del baseline era longitud.** Esa es su lectura.
+
+Lo que **no** es: un baseline limpio contra el que comparar ESM-2. La ablacion
+quita la longitud al baseline y no a los embeddings, asi que esa comparacion
+esta sesgada a favor de ESM-2. La comparacion preregistrada sigue siendo contra
+`comp_physchem` completo.
+
 ## Compromiso previo
 
 Para que esto no sea narrar lo que salio bien a posteriori, queda escrito antes de
 correr nada:
 
 - El modelo principal es **ESM-2 35M + regresion logistica**.
-- El baseline principal es **composicion + fisicoquimicos con XGBoost**.
+- El baseline principal es **composicion + fisicoquimicos con XGBoost**
+  (el completo, no la ablacion).
 - La metrica principal es **MCC** sobre test, con IC por bootstrap de clusteres.
 - Test se evalua **una sola vez**, al final.
 

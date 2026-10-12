@@ -338,7 +338,7 @@ fisicoquimicos con XGBoost. ¿Por que fijarlo antes? Porque si entrenas trece
 modelos y luego comparas el mejor de un grupo contra el mejor del otro, estas
 comparando dos ganadores de concurso, y los ganadores de concurso ganan en parte
 por suerte. La diferencia sale inflada **siempre**, incluso si los dos metodos
-son identicos. La tabla con los trece modelos se publica como material
+son identicos. La tabla con los dieciseis modelos se publica como material
 descriptivo; **la unica conclusion del proyecto es la comparacion de esa pareja
 fijada**.
 

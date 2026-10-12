@@ -23,7 +23,7 @@ generacion diseñada y sin implementar en
 |---|---|---|---|
 | `data` (descarga + limpieza) | si | si | **si, 2026-10-11** |
 | `split` (clusteres + division) | si | si, con MMseqs2 | no |
-| `baselines` (9 modelos) | si | si, XGBoost incluido | no |
+| `baselines` (12 modelos) | si | si, XGBoost incluido | no |
 | `embeddings` (ESM-2 8M y 35M) | si | si, pesos ya en cache | no |
 | `train` (logreg y MLP) | si | si | no |
 | `evaluate` (metricas + IC + figuras) | si | si | no |

@@ -492,7 +492,7 @@ PREREGISTERED_BASELINE  = "comp_physchem__xgboost"
 ```
 
 La primera version elegia el par **por su MCC en test**. Eso es la maldicion del
-ganador: comparar el mejor de 13 modelos contra el mejor del otro grupo infla la
+ganador: comparar el mejor de 16 modelos contra el mejor del otro grupo infla la
 diferencia **siempre**, incluso bajo H0 cierta, porque los maximos de muestra
 estan sesgados hacia arriba. El par esta fijado por escrito en el README antes de
 correr nada; `_select_comparison_pair` solo recurre a un fallback **por

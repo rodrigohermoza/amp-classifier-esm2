@@ -78,6 +78,15 @@ def cluster_mmseqs2(
             str(coverage),
             "--cov-mode",
             "1",
+            # -s 7.5 sube la sensibilidad del prefiltro: con el valor por
+            # defecto, a 40% de identidad sobre peptidos cortos MMseqs2 pierde
+            # pares reales. --alignment-mode 3 calcula identidad y cobertura en
+            # vez de estimarlas. Ambos cuestan tiempo, y aqui el conjunto es
+            # pequeno, asi que la sensibilidad vale mas que la velocidad.
+            "-s",
+            "7.5",
+            "--alignment-mode",
+            "3",
             "-v",
             "1",
         ]
@@ -245,20 +254,40 @@ def cluster_builtin(
     identity: float,
     coverage: float,
     kmer_size: int = 3,
-    jaccard_prefilter: float = 0.15,
-) -> dict[str, int]:
+    prefilter: float = 0.05,
+) -> tuple[dict[str, int], dict]:
     """Clustering voraz al estilo CD-HIT, sin herramientas externas.
 
     1. Ordenar de mas larga a mas corta (las largas son mejores representantes).
     2. Para cada secuencia, alinear solo contra los representantes que comparten
-       k-meros por encima del umbral de Jaccard, usando un indice invertido de
-       k-meros para no recorrer todos los representantes.
+       suficientes k-meros, usando un indice invertido para no recorrer todos.
     3. Si alguno pasa el umbral de identidad y cobertura, unirse a ese cluster;
        si no, volverse representante de un cluster nuevo.
 
-    El prefiltro es lo que hace esto viable: alinear cada secuencia contra miles
-    de representantes en Python puro seria inviable, pero las operaciones de
-    conjuntos descartan la gran mayoria de pares antes de alinear.
+    El prefiltro hace esto viable: alinear cada secuencia contra miles de
+    representantes en Python puro seria inviable, y las operaciones de conjuntos
+    descartan la mayoria de pares antes de alinear.
+
+    IMPORTANTE (P-03). El prefiltro se definia antes como un indice de Jaccard
+    de 3-meros con umbral 0.15, y eso **anulaba el umbral de identidad**: a 45%
+    de identidad real, entre el 0% y el 1% de los pares llegaba a alinearse, asi
+    que el umbral efectivo era ~0.75 en vez de 0.40 y los parientes cercanos
+    acababan en clusteres distintos, es decir en splits distintos. Dos cambios
+    lo corrigen:
+
+    - Se usa **contencion** `|A∩B| / min(|A|,|B|)` en vez de Jaccard. Jaccard
+      castiga la diferencia de tamano, asi que un peptido de 5 residuos
+      contenido ENTERO en uno de 50 daba 0.062 y se descartaba, pese a tener
+      identidad y cobertura de 1.00. La contencion es ademas coherente con
+      `identity_and_coverage`, que ya normaliza por la secuencia mas corta.
+    - El umbral baja de 0.15 a 0.05. Medido con 8 000 secuencias: 2,4 s y 6 459
+      clusteres con el valor viejo, 5,2 s y 3 592 clusteres con el nuevo. Casi
+      el doble de agrupacion por unos segundos mas.
+
+    Aun asi, este respaldo **no sirve para numeros publicables**: ver la nota de
+    `build_splits` y docs/04.
+
+    Devuelve (mapeo, diagnostico).
     """
     aligner = _make_aligner()
     order = sorted(sequences, key=lambda i: (-len(sequences[i]), i))
@@ -268,10 +297,12 @@ def cluster_builtin(
     rep_kmers: list[frozenset[str]] = []
     mapping: dict[str, int] = {}
     alignments_done = 0
+    candidates_skipped = 0
 
     for seq_id in order:
         seq = sequences[seq_id]
         kmers = kmer_set(seq, kmer_size)
+        n_kmers = len(kmers)
 
         # Candidatos: representantes que comparten al menos un k-mero.
         shared: dict[int, int] = defaultdict(int)
@@ -285,9 +316,21 @@ def cluster_builtin(
         assigned: int | None = None
 
         for rep_idx, n_shared in candidates:
-            union = len(kmers | rep_kmers[rep_idx])
-            if union == 0 or (n_shared / union) < jaccard_prefilter:
+            # n_shared / n_kmers es una cota SUPERIOR de la contencion, porque
+            # el denominador real es min(n_kmers, len(rep_kmers)) <= n_kmers.
+            # Como los candidatos vienen ordenados por n_shared descendente, en
+            # cuanto la cota baja del umbral ningun candidato posterior puede
+            # pasarlo: se corta el bucle en vez de seguir recorriendo cientos
+            # de candidatos sin esperanza (el perfilado de P-11 mostro que el
+            # coste esta aqui y no en los alineamientos).
+            if n_kmers == 0 or (n_shared / n_kmers) < prefilter:
+                candidates_skipped += len(candidates) - candidates.index((rep_idx, n_shared))
+                break
+
+            denom = min(n_kmers, len(rep_kmers[rep_idx]))
+            if denom == 0 or (n_shared / denom) < prefilter:
                 continue
+
             ident, cov = identity_and_coverage(sequences[rep_ids[rep_idx]], seq, aligner)
             alignments_done += 1
             if ident >= identity and cov >= coverage:
@@ -303,11 +346,19 @@ def cluster_builtin(
 
         mapping[seq_id] = assigned
 
+    diagnostics = {
+        "n_clusters": len(rep_ids),
+        "alignments": alignments_done,
+        "candidates_skipped_by_bound": candidates_skipped,
+        "kmer_size": kmer_size,
+        "prefilter": prefilter,
+        "prefilter_criterion": "containment",
+    }
     print(
         f"[split] respaldo propio: {len(rep_ids)} clusteres, "
         f"{alignments_done:,} alineamientos realizados"
     )
-    return mapping
+    return mapping, diagnostics
 
 
 # --- Asignacion de clusteres a splits -------------------------------------
@@ -327,6 +378,16 @@ def assign_splits(df: pd.DataFrame, fractions: dict[str, float], seed: int) -> d
     El reparto exacto es un problema de particion (NP-duro) y no hace falta
     resolverlo: lo que importa es que no haya fuga, no que los porcentajes
     salgan exactos. Los porcentajes reales se registran en el reporte.
+
+    SIEMBRA PREVIA (P-06). La version anterior solo penalizaba el desbalance de
+    clases con peso 0.5, y eso no bastaba: arrancando con deficit 1.0 en los
+    tres splits, los primeros clusteres grandes se repartian uno por split sin
+    que el balance pudiera vencer al deficit. Con familias de AMPs, donde la
+    etiqueta correlaciona con el cluster (el caso real, no uno adverso
+    inventado), salia val con 0% de positivos y test con 100%. Ahora el balance
+    es **restriccion y no penalizacion**: primero se siembra cada split con al
+    menos un cluster de cada clase, y solo despues se aplica el criterio de
+    deficit.
     """
     rng = np.random.default_rng(seed)
     total = len(df)
@@ -353,7 +414,36 @@ def assign_splits(df: pd.DataFrame, fractions: dict[str, float], seed: int) -> d
     current_pos = {k: 0 for k in fractions}
     global_pos_rate = float(df.label.mean())
 
+    # --- Siembra: garantizar ambas clases en cada split -------------------
+    # Se reparten los clusteres que contienen positivos, y luego los que
+    # contienen negativos, uno por split, de menor a mayor tamano. Se eligen los
+    # mas pequenos para no gastar la cuota de val y test en un cluster enorme:
+    # la siembra solo tiene que asegurar presencia, no volumen.
+    with_pos = sorted((c for c in clusters if c["n_pos"] > 0), key=lambda c: c["n"])
+    with_neg = sorted((c for c in clusters if c["n"] - c["n_pos"] > 0), key=lambda c: c["n"])
+
+    for pool in (with_pos, with_neg):
+        for split in fractions:
+            # Si este split ya tiene la clase cubierta por la siembra anterior,
+            # no hace falta sembrarla otra vez.
+            already = (
+                current_pos[split] > 0
+                if pool is with_pos
+                else (current[split] - current_pos[split]) > 0
+            )
+            if already:
+                continue
+            seed_cluster = next((c for c in pool if c["id"] not in assigned), None)
+            if seed_cluster is None:
+                continue  # no hay material; la validacion posterior lo detectara
+            assigned[seed_cluster["id"]] = split
+            current[split] += seed_cluster["n"]
+            current_pos[split] += seed_cluster["n_pos"]
+
+    # --- Reparto por deficit del resto ------------------------------------
     for cluster in clusters:
+        if cluster["id"] in assigned:
+            continue
         best_split, best_score = None, None
         for split in fractions:
             # Deficit relativo: que fraccion de su cuota le falta a este split.
@@ -375,6 +465,197 @@ def assign_splits(df: pd.DataFrame, fractions: dict[str, float], seed: int) -> d
     return assigned
 
 
+# --- Verificacion directa de la premisa del proyecto ----------------------
+
+
+def _max_identity_against(
+    queries: list[str],
+    subject_seqs: list[str],
+    subject_kmers: list[frozenset[str]],
+    kmer_index: dict[str, set[int]],
+    aligner,
+    kmer_size: int,
+    prefilter: float,
+) -> list[tuple[float, int | None]]:
+    """Para cada consulta, su identidad maxima contra el conjunto sujeto."""
+    out: list[tuple[float, int | None]] = []
+    for query in queries:
+        kmers = kmer_set(query, kmer_size)
+        n_kmers = len(kmers)
+
+        shared: dict[int, int] = defaultdict(int)
+        for km in kmers:
+            for idx in kmer_index.get(km, ()):
+                shared[idx] += 1
+
+        best_identity = 0.0
+        best_partner: int | None = None
+        for idx, n_shared in sorted(shared.items(), key=lambda kv: -kv[1]):
+            if n_kmers == 0 or (n_shared / n_kmers) < prefilter:
+                break
+            denom = min(n_kmers, len(subject_kmers[idx]))
+            if denom == 0 or (n_shared / denom) < prefilter:
+                continue
+            ident, _cov = identity_and_coverage(subject_seqs[idx], query, aligner)
+            if ident > best_identity:
+                best_identity = ident
+                best_partner = idx
+        out.append((best_identity, best_partner))
+    return out
+
+
+def audit_train_test_identity(
+    df: pd.DataFrame,
+    threshold: float,
+    kmer_size: int = 3,
+    prefilter: float = 0.05,
+    max_test: int | None = None,
+    seed: int = 42,
+    null_model: bool = True,
+) -> dict:
+    """Identidad maxima de cada secuencia de test contra TODO train.
+
+    Esta es la verificacion que faltaba (P-04), y vale mas que cualquier ajuste
+    de parametros del clustering.
+
+    docs/04 afirma que "ninguna secuencia de prueba tiene un pariente cercano en
+    entrenamiento". Ningun algoritmo de clustering voraz garantiza eso, ni el
+    propio ni MMseqs2 ni CD-HIT: todos comparan cada secuencia solo contra
+    **representantes**, asi que A y B al 50% de identidad pueden acabar en
+    clusteres distintos si A se unio a R1 y B a R2 sin superar el umbral contra
+    el representante de la otra. No es un bug, es una propiedad conocida de los
+    algoritmos tipo CD-HIT.
+
+    Asi que en vez de confiar en la agrupacion, se mide el resultado
+    directamente: para cada secuencia de test, su identidad maxima contra el
+    conjunto de entrenamiento completo. Eso convierte la premisa central del
+    proyecto de una afirmacion en un numero publicable: no "dividimos por
+    clusteres, asi que no hay fuga", sino "el X% de las secuencias de test tiene
+    un pariente por encima del umbral en train, y aqui esta la distribucion".
+
+    Se reutiliza el indice invertido de k-meros con un prefiltro laxo. Los pares
+    que el prefiltro descarta tienen identidad muy por debajo del umbral, asi
+    que el numero resultante es una cota inferior ajustada.
+    """
+    aligner = _make_aligner()
+    train = df[df.split == "train"]
+    test = df[df.split == "test"]
+
+    if train.empty or test.empty:
+        return {"error": "train o test vacio; no se puede auditar"}
+
+    train_seqs = train.sequence.tolist()
+    train_kmers = [kmer_set(s, kmer_size) for s in train_seqs]
+
+    kmer_index: dict[str, set[int]] = defaultdict(set)
+    for idx, kms in enumerate(train_kmers):
+        for km in kms:
+            kmer_index[km].add(idx)
+
+    test_rows = test
+    sampled = False
+    if max_test is not None and len(test) > max_test:
+        test_rows = test.sample(n=max_test, random_state=seed)
+        sampled = True
+
+    test_seqs = test_rows.sequence.tolist()
+    results = _max_identity_against(
+        test_seqs, train_seqs, train_kmers, kmer_index, aligner, kmer_size, prefilter
+    )
+    arr = np.asarray([r[0] for r in results])
+
+    offenders = []
+    for row, (ident, partner) in zip(test_rows.itertuples(), results):
+        if ident >= threshold and len(offenders) < 25:
+            offenders.append(
+                {
+                    "test_id": row.id,
+                    "test_sequence": row.sequence,
+                    "max_identity": round(ident, 4),
+                    "closest_train_id": train.iloc[partner].id if partner is not None else None,
+                }
+            )
+
+    report = {
+        "threshold": threshold,
+        "n_test_audited": int(len(arr)),
+        "sampled": sampled,
+        "n_over_threshold": int((arr >= threshold).sum()),
+        "fraction_over_threshold": round(float((arr >= threshold).mean()), 4) if len(arr) else 0.0,
+        "max_identity_distribution": {
+            "mean": round(float(arr.mean()), 4),
+            "median": round(float(np.median(arr)), 4),
+            "p90": round(float(np.quantile(arr, 0.90)), 4),
+            "p99": round(float(np.quantile(arr, 0.99)), 4),
+            "max": round(float(arr.max()), 4),
+        },
+        "histogram": {
+            f"{lo:.1f}-{lo + 0.1:.1f}": int(((arr >= lo) & (arr < lo + 0.1)).sum())
+            for lo in np.arange(0.0, 1.0, 0.1)
+        },
+        "offenders": offenders,
+    }
+
+    # --- Distribucion nula ------------------------------------------------
+    # Sin esto el numero de arriba es ININTERPRETABLE, y es un error que casi
+    # comete este proyecto (P-12). En peptidos cortos, con alineamiento global
+    # y huecos permitidos, dos secuencias SIN relacion alguna alinean a ~0.32
+    # de identidad de media. Es decir que el umbral del 40% esta dentro del
+    # ruido de fondo de la metrica, y un "29% de test por encima del umbral"
+    # puede no indicar ninguna fuga.
+    #
+    # El nulo se construye barajando los residuos de cada secuencia de test:
+    # conserva longitud y composicion exactas, que son lo que determina la
+    # identidad de fondo, y destruye cualquier parentesco real. La comparacion
+    # entre la distribucion real y la nula es la que de verdad informa.
+    if null_model:
+        rng = np.random.default_rng(seed)
+        shuffled = []
+        for s in test_seqs:
+            chars = list(s)
+            rng.shuffle(chars)
+            shuffled.append("".join(chars))
+
+        null_results = _max_identity_against(
+            shuffled, train_seqs, train_kmers, kmer_index, aligner, kmer_size, prefilter
+        )
+        null_arr = np.asarray([r[0] for r in null_results])
+
+        excess = float((arr >= threshold).mean() - (null_arr >= threshold).mean())
+        report["null_model"] = {
+            "description": (
+                "Mismas secuencias de test con sus residuos barajados: conserva "
+                "longitud y composicion, destruye el parentesco. Es el ruido de "
+                "fondo de la metrica de identidad."
+            ),
+            "mean": round(float(null_arr.mean()), 4),
+            "p90": round(float(np.quantile(null_arr, 0.90)), 4),
+            "p99": round(float(np.quantile(null_arr, 0.99)), 4),
+            "max": round(float(null_arr.max()), 4),
+            "fraction_over_threshold": round(float((null_arr >= threshold).mean()), 4),
+        }
+        report["excess_over_null"] = round(excess, 4)
+        report["excess_over_null_note"] = (
+            "fraction_over_threshold real menos la del nulo. ESTE es el numero que "
+            "mide fuga por homologia; el crudo incluye el ruido de fondo de la "
+            "metrica. Un valor cercano a 0 significa que no hay fuga detectable, "
+            "aunque el crudo parezca alto. Ver docs/09, P-12."
+        )
+        # Umbral de fondo: el percentil 99 del nulo es un umbral de identidad
+        # por encima del cual un parecido ya no se explica por azar.
+        p99_null = float(np.quantile(null_arr, 0.99))
+        report["suggested_threshold_above_noise"] = round(p99_null, 4)
+        report["n_above_noise_threshold"] = int((arr > p99_null).sum())
+
+    report["note"] = (
+        "Identidad maxima de cada secuencia de test contra todo train. Lee "
+        "excess_over_null, no fraction_over_threshold a secas: la metrica de "
+        "identidad tiene un ruido de fondo alto en peptidos cortos. "
+        "Ver docs/09, P-04 y P-12."
+    )
+    return report
+
+
 # --- Orquestacion ---------------------------------------------------------
 
 
@@ -390,9 +671,32 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     methods = list(scfg.get("methods", ["mmseqs2", "cdhit", "builtin"]))
     bcfg = dict(scfg.get("builtin", {}))
 
+    # P-10e: unas fracciones mal puestas dejarian la columna split en None, la
+    # verificacion de fuga pasaria (0 valores unicos por cluster) y el fallo
+    # aparaceria dos etapas mas tarde como un error opaco de sklearn.
+    if set(fractions) != {"train", "val", "test"}:
+        raise ValueError(
+            f"split.fractions debe tener exactamente train, val y test; hay: {sorted(fractions)}"
+        )
+    if abs(sum(fractions.values()) - 1.0) > 0.01:
+        raise ValueError(f"split.fractions debe sumar 1.0; suma {sum(fractions.values())}")
+
     if not PEPTIDES_PATH.exists():
         raise FileNotFoundError(f"Falta {PEPTIDES_PATH}. Corre 'make data' primero.")
     df = pd.read_csv(PEPTIDES_PATH)
+
+    # P-10b: la deduplicacion de clean.py es por SECUENCIA, no por id, asi que
+    # dos secuencias distintas bajo el mismo accession producen ids repetidos.
+    # El dict de abajo pisaria una de las dos: no fallaria nada, pero una
+    # secuencia no se agruparia, ambas filas heredarian el mismo cluster_id y el
+    # cruce de interpret.py duplicaria filas inflando los conteos.
+    if df.id.duplicated().any():
+        dups = df.id[df.id.duplicated()].unique()[:5].tolist()
+        raise RuntimeError(
+            f"{int(df.id.duplicated().sum())} ids duplicados en {PEPTIDES_PATH.name}, "
+            f"por ejemplo {dups}. Desambigua el id en clean.py (p. ej. con seq_sha1)."
+        )
+
     sequences = dict(zip(df.id, df.sequence))
     print(f"[split] {len(sequences)} secuencias, umbral de identidad {identity}")
 
@@ -402,6 +706,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     mapping: dict[str, int] | None = None
     used_method = None
     used_version = None
+    cluster_diagnostics: dict = {}
 
     for method in methods:
         if method == "mmseqs2":
@@ -420,13 +725,19 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             mapping = cluster_cdhit(sequences, identity, coverage)
         elif method == "builtin":
             version = "interno"
-            print("[split] usando el respaldo propio en Python (puede tardar minutos)")
-            mapping = cluster_builtin(
+            print(
+                "[split] AVISO: usando el respaldo propio en Python.\n"
+                "[split] Este metodo NO sirve para numeros publicables: agrupa menos\n"
+                "[split] que MMseqs2 y deja fuga residual por homologia. Instala\n"
+                "[split] MMseqs2 ('brew install mmseqs2') antes de publicar resultados.\n"
+                "[split] Ver docs/09-problemas-encontrados.md, P-03."
+            )
+            mapping, cluster_diagnostics = cluster_builtin(
                 sequences,
                 identity,
                 coverage,
                 kmer_size=int(bcfg.get("kmer_size", 3)),
-                jaccard_prefilter=float(bcfg.get("kmer_jaccard_prefilter", 0.15)),
+                prefilter=float(bcfg.get("kmer_prefilter", 0.05)),
             )
         else:
             raise ValueError(f"Metodo de clustering desconocido: {method!r}")
@@ -447,12 +758,49 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     assignment = assign_splits(df, fractions, params.seed)
     df["split"] = df.cluster_id.map(assignment)
 
+    if df.split.isna().any():
+        raise RuntimeError(f"{int(df.split.isna().sum())} filas sin split asignado")
+
     # Verificacion del invariante, aqui y no solo en los tests: si esto falla,
     # es mejor no escribir el archivo que escribir uno invalido.
     per_cluster = df.groupby("cluster_id").split.nunique()
     if (per_cluster > 1).any():
         culprits = per_cluster[per_cluster > 1].index.tolist()[:10]
         raise RuntimeError(f"FUGA: clusteres repartidos entre splits: {culprits}")
+
+    # P-06: splits degenerados. Mismo principio que arriba, mejor abortar que
+    # escribir un archivo que produciria metricas sin sentido. Un val monoclase
+    # revienta roc_auc_score a mitad de la rejilla de hiperparametros; un test
+    # monoclase es peor, porque da NaN y MCC 0.0 SIN aviso y se publicarian
+    # numeros basura.
+    MIN_POSITIVES = 20
+    MIN_CLUSTERS = 10
+    problems: list[str] = []
+    for split in fractions:
+        sub = df[df.split == split]
+        n_pos = int((sub.label == 1).sum())
+        n_neg = int((sub.label == 0).sum())
+        if len(sub) == 0:
+            problems.append(f"{split} esta vacio")
+            continue
+        if n_pos == 0 or n_neg == 0:
+            problems.append(f"{split} tiene una sola clase ({n_pos} positivos, {n_neg} negativos)")
+        elif n_pos < MIN_POSITIVES:
+            problems.append(f"{split} tiene solo {n_pos} positivos (minimo {MIN_POSITIVES})")
+        n_clusters = int(sub.cluster_id.nunique())
+        if n_clusters < MIN_CLUSTERS:
+            problems.append(
+                f"{split} tiene solo {n_clusters} clusteres (minimo {MIN_CLUSTERS}); "
+                "el bootstrap por cluster seria inutil"
+            )
+    if problems:
+        raise RuntimeError(
+            "Division degenerada, no se escribe splits.csv:\n  - "
+            + "\n  - ".join(problems)
+            + "\n\nCausa habitual: muy pocos clusteres, o unos pocos clusteres enormes que "
+            "concentran una clase. Revisa data/processed/clean_report.json y el umbral de "
+            "identidad. Ver docs/09-problemas-encontrados.md, P-06."
+        )
 
     df.to_csv(SPLITS_PATH, index=False)
 
@@ -478,19 +826,52 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             "etiquetas distintas. Probablemente es donde se concentra el ruido de "
             "etiquetado. Ver docs/08-decisiones.md, D-03."
         ),
+        "publishable": used_method != "builtin",
+        "publishable_note": (
+            "false significa que se uso el respaldo propio en Python, que agrupa "
+            "menos que MMseqs2 y deja fuga residual. No publiques metricas con "
+            "publishable=false. Ver docs/09, P-03."
+        ),
+        "cluster_diagnostics": cluster_diagnostics,
         "splits": {},
     }
     for split in fractions:
         sub = df[df.split == split]
+        pos = sub[sub.label == 1]
+        neg = sub[sub.label == 0]
         report["splits"][split] = {
             "n": int(len(sub)),
             "fraction_actual": round(len(sub) / len(df), 4),
             "fraction_target": fractions[split],
-            "n_positive": int((sub.label == 1).sum()),
-            "n_negative": int((sub.label == 0).sum()),
+            "n_positive": int(len(pos)),
+            "n_negative": int(len(neg)),
             "positive_rate": round(float(sub.label.mean()), 4) if len(sub) else 0.0,
             "n_clusters": int(sub.cluster_id.nunique()),
+            # P-05 del informe de metodologia: el emparejado de longitudes es
+            # global, asi que puede no cumplirse DENTRO de cada split. Si las
+            # medias se separan en test, la longitud vuelve a ser un atajo y
+            # `length` es literalmente la primera feature fisicoquimica.
+            "length_mean_positive": round(float(pos.length.mean()), 2) if len(pos) else None,
+            "length_mean_negative": round(float(neg.length.mean()), 2) if len(neg) else None,
+            "length_ks_pvalue": _length_ks_pvalue(pos, neg),
         }
+
+    report["length_matching_note"] = (
+        "length_ks_pvalue es un test de Kolmogorov-Smirnov de dos muestras entre "
+        "las longitudes de positivos y negativos DENTRO de cada split. Un p-valor "
+        "bajo en test significa que la longitud sigue separando las clases y que "
+        "parte del rendimiento puede venir de ahi. Ver docs/09, P-10."
+    )
+
+    # P-04: la verificacion directa de la premisa del proyecto.
+    print("[split] auditando identidad maxima test-vs-train...")
+    report["train_test_identity_audit"] = audit_train_test_identity(
+        df,
+        threshold=identity,
+        kmer_size=int(bcfg.get("kmer_size", 3)),
+        prefilter=float(bcfg.get("kmer_prefilter", 0.05)),
+        seed=params.seed,
+    )
 
     SPLIT_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -502,5 +883,43 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             f"{info['n_positive']}+ / {info['n_negative']}-  "
             f"tasa positiva {info['positive_rate']:.3f}"
         )
+
+    audit = report["train_test_identity_audit"]
+    if "error" not in audit:
+        print(
+            f"[split] identidad test-vs-train: {audit['fraction_over_threshold']:.1%} "
+            f"por encima de {identity} (crudo)"
+        )
+        if "null_model" in audit:
+            null = audit["null_model"]
+            print(
+                f"[split]   ruido de fondo (secuencias barajadas): "
+                f"{null['fraction_over_threshold']:.1%}, media {null['mean']:.3f}"
+            )
+            print(
+                f"[split]   FUGA REAL (exceso sobre el nulo): " f"{audit['excess_over_null']:+.1%}"
+            )
+            noise_cut = audit["suggested_threshold_above_noise"]
+            print(
+                f"[split]   por encima del ruido (identidad > {noise_cut:.2f}): "
+                f"{audit['n_above_noise_threshold']} de {audit['n_test_audited']}"
+            )
+            if audit["excess_over_null"] > 0.02:
+                print(
+                    "[split] AVISO: hay fuga por homologia por encima del ruido de fondo. "
+                    "Revisa el metodo de clustering antes de publicar."
+                )
+    if not report["publishable"]:
+        print("[split] AVISO: publishable=false (se uso el respaldo propio). Ver docs/09, P-03.")
+
     print(f"[split] {SPLITS_PATH}")
     return df
+
+
+def _length_ks_pvalue(pos: pd.DataFrame, neg: pd.DataFrame) -> float | None:
+    """p-valor de Kolmogorov-Smirnov entre las longitudes de ambas clases."""
+    if len(pos) < 2 or len(neg) < 2:
+        return None
+    from scipy.stats import ks_2samp
+
+    return round(float(ks_2samp(pos.length.to_numpy(), neg.length.to_numpy()).pvalue), 6)

@@ -80,10 +80,19 @@ Algoritmo:
    creados. Si la identidad con alguno supera el umbral, se une a ese cluster.
    Si no, se vuelve representante de un cluster nuevo.
 3. **Prefiltro por k-meros** para evitar el coste cuadratico: solo se alinea
-   contra representantes que comparten al menos una fraccion minima de 3-meros
-   (indice de Jaccard sobre el conjunto de 3-meros). Un alineamiento completo
-   contra los ~miles de representantes seria inviable; el prefiltro descarta la
-   gran mayoria con operaciones de conjuntos.
+   contra representantes que comparten suficientes 3-meros. Un alineamiento
+   completo contra los miles de representantes seria inviable; el prefiltro
+   descarta la mayoria con operaciones de conjuntos.
+
+   El criterio es la **contencion**, `|A inter B| / min(|A|,|B|)`, con umbral
+   0.05. Esto no es un detalle de implementacion: la primera version usaba el
+   indice de Jaccard con umbral 0.15 y eso **anulaba el umbral de identidad**.
+   A 45% de identidad real, entre el 0% y el 1% de los pares llegaba a
+   alinearse, asi que el umbral efectivo era ~0.75 en vez de 0.40. Jaccard
+   castiga la diferencia de tamano, de modo que un peptido de 6 residuos
+   contenido **entero** dentro de uno de 50 daba 0.06 y se descartaba, pese a
+   tener identidad y cobertura de 1.00. Historia completa en
+   [09-problemas-encontrados.md](09-problemas-encontrados.md), P-03.
 4. La identidad se calcula con alineamiento global de Biopython
    (`PairwiseAligner`, matriz BLOSUM62, modo global) y se define como
    `residuos identicos / longitud de la secuencia mas corta`.
@@ -119,6 +128,45 @@ solo puede desbordar la cuota de `test`.
 `tests/test_split.py` comprueba que la interseccion de `cluster_id` entre
 cualquier par de splits sea vacia. **Si ese test falla, ninguna metrica del
 proyecto es valida.** Esta puesto como test y no como comentario a proposito.
+
+Pero ese invariante **no basta**, y conviene entender por que. Verifica la
+*asignacion*, no la *agrupacion*: si dos parientes acaban en clusteres
+distintos, cada uno puede irse a un split distinto sin violar ninguna regla. Es
+exactamente lo que pasaba con el prefiltro viejo. Un test puede ser correcto y
+aun asi vigilar el eslabon equivocado de la cadena.
+
+## La verificacion que de verdad respalda la premisa
+
+Ninguna herramienta de clustering voraz garantiza que no haya parientes entre
+train y test. Todas, incluidas MMseqs2 y CD-HIT, comparan cada secuencia solo
+contra **representantes**, asi que A y B al 50% de identidad pueden acabar
+separadas si cada una se unio a un representante distinto. No es un fallo, es
+una propiedad del algoritmo.
+
+Asi que en vez de confiar en la agrupacion, se mide el resultado: para cada
+secuencia de test, su **identidad maxima contra todo el conjunto de
+entrenamiento**. El resultado va a `split_report.json` con su histograma.
+
+### Y ese numero se lee contra una distribucion nula
+
+La primera corrida de esta auditoria dijo que el 29% de las secuencias de test
+tenian identidad >= 0.4 contra train, lo que leido tal cual significaria que
+todo el metodo no sirve. Es falso, y la razon es importante: **la identidad de
+secuencia tiene un ruido de fondo alto en peptidos cortos**. Con alineamiento
+global y huecos permitidos, dos peptidos sin ninguna relacion alinean al 0.33
+de media, y uno de cada tres supera el 0.4 por azar.
+
+Por eso la auditoria baraja los residuos de cada secuencia de test, lo que
+conserva longitud y composicion y destruye el parentesco, y repite la medicion.
+Lo que se reporta como fuga es el **exceso sobre ese nulo**:
+
+```
+fraction_over_threshold            29.3%   <- crudo, no significa nada solo
+null_model.fraction_over_threshold 30.4%   <- ruido de fondo
+excess_over_null                   -1.1%   <- ESTO es la fuga
+```
+
+Detalle en [09-problemas-encontrados.md](09-problemas-encontrados.md), P-12.
 
 ## Lo que se guarda
 

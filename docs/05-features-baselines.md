@@ -28,7 +28,7 @@ Simple hasta lo tonto, y aun asi fuerte: captura indirectamente la carga (K, R),
 la hidrofobicidad (L, I, V, F, W) y rasgos estructurales (alto contenido de P o
 de G es caracteristico de ciertas familias). No captura nada del orden.
 
-## Conjunto B: descriptores fisicoquimicos (10 features)
+## Conjunto B: descriptores fisicoquimicos (11 features)
 
 | Descriptor | Que mide | Como se calcula |
 |---|---|---|
@@ -40,8 +40,22 @@ de G es caracteristico de ciertas familias). No captura nada del orden.
 | `hydrophobic_fraction` | Proporcion apolar | Fraccion de A, C, F, I, L, M, V, W, Y |
 | `aromaticity` | Contenido aromatico | Fraccion de F, W, Y |
 | `aliphatic_index` | Volumen alifatico | Indice de Ikai |
-| `boman_index` | Potencial de union a proteinas | Suma de energias libres de transferencia / longitud |
+| `boman_index` | Potencial de union a proteinas | Media de las energias de transferencia ciclohexano-agua (Radzicka y Wolfenden) |
+| `interfacial_hydrophobicity` | Preferencia por la interfaz lipidica | Media de la escala interfacial de Wimley-White |
 | `charge_density` | Carga por residuo | `net_charge / length` |
+
+El **indice de Boman** merece una advertencia, porque este proyecto ya se
+equivoco con el una vez. Se define sobre las energias libres de transferencia
+**ciclohexano -> agua** de Radzicka y Wolfenden, donde la arginina domina la
+escala con 14.92 kcal/mol. La primera version uso por error la escala
+interfacial de Wimley-White con el signo invertido: LL-37 daba 0.35 en vez de
+3.0, un orden de magnitud, y la arginina quedaba al nivel de la asparagina,
+justo al reves de lo que hace util al indice para AMPs cationicos. Detalle en
+[09-problemas-encontrados.md](09-problemas-encontrados.md), P-08. La escala de
+Wimley-White se conserva, pero como descriptor propio y con su nombre correcto.
+
+Desde entonces, **todo descriptor entra con un test que compara su valor contra
+el publicado** para al menos un peptido conocido (D-14).
 
 El **momento hidrofobico** merece una nota, porque es el descriptor conceptualmente
 mas interesante. Trata cada residuo como un vector: direccion dada por su angulo
@@ -55,7 +69,7 @@ Se calcula sobre la ventana de 11 residuos que maximiza el momento, no sobre tod
 la secuencia, porque un peptido puede tener un segmento anfipatico dentro de una
 secuencia que globalmente no lo es.
 
-## Conjunto C: A + B (30 features)
+## Conjunto C: A + B (31 features)
 
 La combinacion. Es el baseline principal contra el que se compara ESM-2.
 

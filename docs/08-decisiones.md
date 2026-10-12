@@ -164,3 +164,75 @@ composicion, usar un comite de modelos), no una lista de candidatos.
 Es mas honesto y, para una entrevista, mas interesante: demuestra que entiendo el
 limite de la herramienta. No se publicaran secuencias propuestas como candidatos
 de sintesis.
+
+---
+
+## D-11 — El respaldo de clustering no produce numeros publicables
+**Fecha:** 2026-10-11
+
+Tras corregir el prefiltro (P-03), el respaldo propio sigue agrupando menos que
+MMseqs2 y usando una heuristica distinta. Dos personas que clonen el repositorio
+y usen metodos distintos obtendrian particiones distintas y, por tanto,
+metricas distintas.
+
+**Decision:** MMseqs2 es obligatorio para cualquier numero publicable. El
+respaldo queda para CI, pruebas y para que `make split` funcione en una maquina
+limpia. `build_splits` avisa de forma ruidosa y el reporte lleva
+`publishable: false` cuando se usa.
+
+**Alternativa descartada:** hacer que el respaldo falle directamente. Se
+rechazo porque rompe la propiedad de "se clona y funciona", que tiene valor por
+si misma; basta con que no pueda producir numeros en silencio.
+
+---
+
+## D-12 — El par de la comparacion principal se fija por preregistro
+**Fecha:** 2026-10-11
+
+El codigo elegia el mejor de 13 modelos por su MCC en test y lo comparaba en
+test (P-05).
+
+**Decision:** `_select_comparison_pair` usa las dos etiquetas preregistradas en
+docs/07 si existen, y si no, el mejor de cada familia por ROC-AUC de
+validacion. El JSON de salida incluye `selected_on`.
+
+**Consecuencia que conviene asumir:** si otro modelo resulta mejor en test, la
+comparacion preregistrada seguira usando el par fijado. Eso es correcto, no una
+limitacion: la tabla con los 13 modelos queda como material descriptivo y la
+unica inferencia del proyecto es la comparacion preregistrada. El README lo
+dice.
+
+---
+
+## D-13 — Toda medida de fuga se reporta contra una distribucion nula
+**Fecha:** 2026-10-11
+
+Ver P-12. La identidad de secuencia entre peptidos cortos tiene un ruido de
+fondo del orden de 0.33, asi que una fraccion cruda por encima del 40% no
+distingue fuga de azar.
+
+**Decision:** la auditoria baraja los residuos de cada secuencia de test
+(conservando longitud y composicion) y reporta el **exceso sobre el nulo** como
+la medida de fuga. El numero crudo se conserva, pero el reporte dice
+explicitamente cual hay que leer.
+
+**Por que es una decision y no solo un arreglo:** fija un principio para el
+resto del proyecto. Cualquier numero de diagnostico que se anada despues tiene
+que venir con su control, igual que se exige a las metricas de clasificacion.
+
+---
+
+## D-14 — Las escalas fisicoquimicas se verifican contra peptidos publicados
+**Fecha:** 2026-10-11
+
+El error de la escala de Boman (P-08) existio porque se verificaron solo los
+descriptores faciles (carga, momento) y no el resto.
+
+**Decision:** todo descriptor nuevo entra con un test que compara su valor
+contra el publicado para al menos un peptido conocido. Hoy: carga de
+magainina-2 (+3.0) y LL-37 (+5.9), Boman de LL-37 (3.0) y magainina-2 (0.42),
+GRAVY de magainina-2 contra ExPASy, momento ~0 en homopolimeros.
+
+**Coste:** hay que buscar un valor de referencia por descriptor, que no siempre
+es rapido. Vale la pena: un descriptor con la escala equivocada no falla, solo
+empeora el modelo en silencio y envenena la interpretacion.

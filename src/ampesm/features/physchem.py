@@ -63,10 +63,41 @@ EISENBERG = {
     "V": 1.08,
 }
 
-# Energia libre de transferencia de agua a interfaz lipidica (kcal/mol), la
-# escala que se usa habitualmente para el indice de Boman. El indice se define
-# con signo invertido respecto a estos valores (ver boman_index).
-TRANSFER_FREE_ENERGY = {
+# Energias libres de transferencia ciclohexano -> agua de las cadenas laterales
+# (kcal/mol), de Radzicka y Wolfenden (1988). Es la escala sobre la que se
+# define el indice de Boman. La arginina domina (14.92), seguida de D y E; los
+# alifaticos quedan en el extremo negativo.
+#
+# P-08: aqui habia antes la escala interfacial de Wimley-White con el signo
+# invertido (se reconocia por W=1.85, F=1.13, E=-2.02). Con esa tabla la
+# arginina quedaba al nivel de N y Q, justo al reves de lo que hace util al
+# indice para AMPs cationicos, y LL-37 daba 0.35 en vez de ~3.0.
+RADZICKA_WOLFENDEN = {
+    "R": 14.92,
+    "D": 8.72,
+    "E": 6.81,
+    "N": 6.64,
+    "K": 5.55,
+    "Q": 5.54,
+    "H": 4.66,
+    "S": 3.40,
+    "T": 2.57,
+    "Y": 0.14,
+    "P": 0.00,
+    "G": -0.94,
+    "C": -1.28,
+    "A": -1.81,
+    "W": -2.33,
+    "M": -2.35,
+    "F": -2.98,
+    "V": -4.04,
+    "I": -4.92,
+    "L": -4.92,
+}
+
+# Escala interfacial de Wimley-White (kcal/mol), conservada como descriptor
+# propio. Mide la preferencia por la interfaz lipidica, no la union a proteinas.
+WIMLEY_WHITE_INTERFACIAL = {
     "A": -0.17,
     "R": -0.81,
     "N": -0.42,
@@ -109,6 +140,7 @@ FEATURE_NAMES: list[str] = [
     "aromaticity",
     "aliphatic_index",
     "boman_index",
+    "interfacial_hydrophobicity",
     "charge_density",
 ]
 
@@ -145,15 +177,24 @@ def net_charge(sequence: str, ph: float = 7.4) -> float:
     return charge
 
 
-def isoelectric_point(sequence: str, lo: float = 0.0, hi: float = 14.0) -> float:
+def isoelectric_point(sequence: str, lo: float = 0.0, hi: float = 20.0) -> float:
     """pH al que la carga neta es cero, por biseccion.
 
     La curva de carga es monotona decreciente en pH, asi que la biseccion
-    converge siempre. 100 iteraciones dan precision mas que suficiente.
+    converge siempre. 60 iteraciones agotan la precision de doble sobre este
+    intervalo; las 100 de antes eran trabajo sin ganancia.
+
+    El intervalo llega a 20 y no a 14 porque un peptido muy basico puede no
+    tener su pI por debajo de 14: con 35 argininas en 50 residuos la carga sigue
+    siendo positiva a pH 14, y la version anterior devolvia 14.0 en silencio, que
+    es el borde del intervalo y no un pI. Si aun asi no hay cambio de signo, se
+    devuelve NaN en vez de un numero inventado.
     """
     if not sequence:
         return 0.0
-    for _ in range(100):
+    if net_charge(sequence, lo) <= 0 or net_charge(sequence, hi) >= 0:
+        return float("nan")
+    for _ in range(60):
         mid = (lo + hi) / 2.0
         if net_charge(sequence, mid) > 0:
             lo = mid
@@ -233,15 +274,30 @@ def aliphatic_index(sequence: str) -> float:
 def boman_index(sequence: str) -> float:
     """Indice de Boman: potencial de interaccion con proteinas.
 
-    Se define como la suma de energias libres de transferencia de las cadenas
-    laterales, con el signo invertido y dividida por la longitud. Valores altos
-    indican tendencia a unirse a proteinas; valores bajos, preferencia por la
-    membrana.
+    Suma de las energias libres de transferencia ciclohexano -> agua de las
+    cadenas laterales, dividida por la longitud. Valores altos indican tendencia
+    a unirse a proteinas; valores bajos, preferencia por la membrana.
+
+    Verificado contra valores publicados: LL-37 ~3.0 kcal/mol (APD3 reporta
+    2,9-3,0) y magainina-2 ~0.42.
     """
     if not sequence:
         return 0.0
-    total = sum(TRANSFER_FREE_ENERGY.get(aa, 0.0) for aa in sequence)
-    return -total / len(sequence)
+    total = sum(RADZICKA_WOLFENDEN.get(aa, 0.0) for aa in sequence)
+    return total / len(sequence)
+
+
+def interfacial_hydrophobicity(sequence: str) -> float:
+    """Hidrofobicidad interfacial media (escala de Wimley-White).
+
+    Mide la preferencia por la interfaz agua-lipido, que es donde se inserta un
+    AMP. Correlaciona con GRAVY, pero pondera distinto los aromaticos: el
+    triptofano, que se acumula en las interfaces de membrana, es el residuo con
+    el valor mas alto de la escala.
+    """
+    if not sequence:
+        return 0.0
+    return sum(WIMLEY_WHITE_INTERFACIAL.get(aa, 0.0) for aa in sequence) / len(sequence)
 
 
 def physchem_vector(sequence: str, ph: float = 7.4, window: int = 11, angle: float = 100.0):
@@ -259,6 +315,7 @@ def physchem_vector(sequence: str, ph: float = 7.4, window: int = 11, angle: flo
             aromaticity(sequence),
             aliphatic_index(sequence),
             boman_index(sequence),
+            interfacial_hydrophobicity(sequence),
             charge / length if length else 0.0,
         ],
         dtype=np.float64,

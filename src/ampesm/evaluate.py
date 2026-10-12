@@ -50,13 +50,29 @@ def threshold_metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
     }
 
 
+METRIC_NAMES = ("roc_auc", "pr_auc", "mcc", "f1", "sensitivity", "specificity", "precision")
+
+
 def all_metrics(y: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float]:
     """Todas las metricas de una vez.
 
-    Si el remuestreo deja una sola clase, ROC-AUC no esta definido; se devuelve
-    NaN y el percentil del bootstrap lo ignora. Es raro pero pasa con clusteres
-    grandes y desbalanceados.
+    Si el remuestreo deja una sola clase (o esta vacio), NINGUNA metrica esta
+    definida y se devuelven todas como NaN, para que el percentil del bootstrap
+    las ignore.
+
+    P-07: antes solo se capturaba la excepcion de ROC-AUC, que es la unica
+    metrica que lanza. Las demas devuelven valores finitos pero degenerados y
+    entraban en el intervalo de confianza: con `y=[1,1,1]`,
+    `average_precision_score` devuelve 1.0, `matthews_corrcoef` devuelve 0.0 por
+    denominador nulo, y los guardas de `threshold_metrics` devuelven 0.0. Eso
+    contaminaba los intervalos de PR-AUC y MCC, que son las dos metricas
+    principales del proyecto, con unos y ceros duros. En `paired_difference` era
+    peor: aportaba un cero exacto que contraia el intervalo de la diferencia
+    hacia "no distinguible".
     """
+    if len(y) == 0 or len(np.unique(y)) < 2:
+        return dict.fromkeys(METRIC_NAMES, float("nan"))
+
     out: dict[str, float] = {}
     for name, fn in RANKING_METRICS.items():
         try:
@@ -75,7 +91,21 @@ def choose_threshold(
     Se barren los propios valores de puntuacion como candidatos, en vez de una
     rejilla fija: el optimo siempre esta en uno de ellos, porque la metrica solo
     cambia cuando el umbral cruza una puntuacion observada.
+
+    P-10d: con validacion vacia o monoclase, todos los candidatos empataban y se
+    devolvia el score MAS BAJO de val como umbral, con lo que en test se
+    predecia casi todo positivo. Y con val vacia se devolvia `-inf`, que
+    `json.dumps` escribe como `-Infinity`, que no es JSON valido. Ahora falla
+    explicitamente en vez de devolver un umbral sin sentido.
     """
+    if len(y_val) == 0:
+        raise ValueError("No se puede elegir el umbral: el conjunto de validacion esta vacio")
+    if len(np.unique(y_val)) < 2:
+        raise ValueError(
+            "No se puede elegir el umbral: validacion tiene una sola clase. "
+            "Revisa la division (docs/09, P-06)."
+        )
+
     candidates = np.unique(scores_val)
     if len(candidates) > 2000:
         candidates = np.quantile(candidates, np.linspace(0, 1, 2000))
@@ -132,12 +162,23 @@ def bootstrap_metrics(
     out = {}
     for name, values in samples.items():
         arr = np.asarray(values, dtype=float)
+        n_total = len(arr)
         arr = arr[~np.isnan(arr)]
+        # Descartar remuestreos degenerados condiciona el intervalo, asi que se
+        # registra cuantos sobrevivieron: sin este numero no queda rastro de
+        # cuantos se fueron y el IC parece mas fiable de lo que es (P-07).
         out[name] = {
             "point": point[name],
             "ci_low": float(np.quantile(arr, alpha)) if len(arr) else float("nan"),
             "ci_high": float(np.quantile(arr, 1 - alpha)) if len(arr) else float("nan"),
+            "n_boot_valid": int(len(arr)),
+            "n_boot_requested": int(n_total),
         }
+        if n_total and len(arr) / n_total < 0.99:
+            print(
+                f"[eval] AVISO: {n_total - len(arr)} de {n_total} remuestreos degenerados "
+                f"descartados para {name}; el IC esta condicionado"
+            )
     return out
 
 
@@ -244,12 +285,20 @@ def plot_curves(results: dict[str, pd.DataFrame]) -> None:
         fig, ax = plt.subplots(figsize=(6.5, 5.5))
         for tag, df in sorted(results.items()):
             y, scores = df.label.to_numpy(), df.score.to_numpy()
-            if kind == "roc":
-                x_vals, y_vals, _ = roc_curve(y, scores)
-                score = roc_auc_score(y, scores)
-            else:
-                y_vals, x_vals, _ = precision_recall_curve(y, scores)
-                score = average_precision_score(y, scores)
+            # Si test quedara monoclase, roc_curve lanza ValueError. Aqui ya
+            # estan escritas todas las metricas, asi que reventar al dibujar
+            # perderia la etapa entera por una figura: se omite la curva y se
+            # avisa.
+            try:
+                if kind == "roc":
+                    x_vals, y_vals, _ = roc_curve(y, scores)
+                    score = roc_auc_score(y, scores)
+                else:
+                    y_vals, x_vals, _ = precision_recall_curve(y, scores)
+                    score = average_precision_score(y, scores)
+            except ValueError as exc:
+                print(f"[eval] AVISO: no se pudo dibujar la curva {kind} de {tag}: {exc}")
+                continue
             ax.plot(x_vals, y_vals, lw=1.6, label=f"{tag} ({score:.3f})")
 
         if kind == "roc":
@@ -355,6 +404,44 @@ def plot_calibration(results: dict[str, pd.DataFrame]) -> None:
 # --- Orquestacion ---------------------------------------------------------
 
 
+# Par preregistrado en docs/07, seccion "Compromiso previo". Si ambas etiquetas
+# existen entre las predicciones, la comparacion usa exactamente estas, que es
+# lo que el preregistro promete. Si no, se cae a la mejor por validacion.
+PREREGISTERED_EMBEDDING = "facebook_esm2_t12_35M_UR50D__logreg"
+PREREGISTERED_BASELINE = "comp_physchem__xgboost"
+
+
+def _select_comparison_pair(
+    summary: pd.DataFrame, val_scores: dict[str, float]
+) -> tuple[str | None, str | None, str]:
+    """Elige los dos modelos a comparar SIN mirar test.
+
+    Devuelve (modelo_embeddings, modelo_baseline, criterio_usado).
+
+    Dos criterios, en orden:
+
+    1. Las etiquetas preregistradas en docs/07, si existen. Es lo mas fuerte
+       posible: el par se fijo por escrito antes de correr nada.
+    2. El mejor de cada familia por ROC-AUC de **validacion**.
+
+    Lo que nunca se usa es el resultado en test, que es lo que hacia la version
+    anterior (P-05).
+    """
+    tags = list(summary.tag)
+    emb_tags = [t for t in tags if t.startswith("facebook_")]
+    base_tags = [t for t in tags if not t.startswith("facebook_")]
+
+    if not emb_tags or not base_tags:
+        return None, None, "no aplicable: falta una de las dos familias"
+
+    if PREREGISTERED_EMBEDDING in emb_tags and PREREGISTERED_BASELINE in base_tags:
+        return PREREGISTERED_EMBEDDING, PREREGISTERED_BASELINE, "preregistro (docs/07)"
+
+    best_emb = max(emb_tags, key=lambda t: val_scores.get(t, -1.0))
+    best_base = max(base_tags, key=lambda t: val_scores.get(t, -1.0))
+    return best_emb, best_base, "mejor ROC-AUC en validacion"
+
+
 def evaluate_all() -> pd.DataFrame:
     """Evalua todas las predicciones guardadas y escribe metricas y figuras."""
     ensure_dirs()
@@ -373,6 +460,7 @@ def evaluate_all() -> pd.DataFrame:
 
     test_frames: dict[str, pd.DataFrame] = {}
     thresholds: dict[str, float] = {}
+    val_scores_by_tag: dict[str, float] = {}
     rows = []
 
     print(f"[eval] {len(files)} modelos; bootstrap de {n_boot} por {unit}")
@@ -388,6 +476,9 @@ def evaluate_all() -> pd.DataFrame:
         )
         thresholds[tag] = threshold
         test_frames[tag] = test
+        # Se guarda el ROC-AUC de VALIDACION, que es el criterio con el que se
+        # elige el par a comparar (P-05). Nunca el de test.
+        val_scores_by_tag[tag] = float(roc_auc_score(val.label, val.score))
 
         metrics = bootstrap_metrics(test, threshold, n_boot, unit, ci, params.seed)
         pred = (test.score.to_numpy() >= threshold).astype(int)
@@ -428,13 +519,19 @@ def evaluate_all() -> pd.DataFrame:
     summary = pd.DataFrame(rows).sort_values("mcc", ascending=False).reset_index(drop=True)
     summary.to_csv(METRICS_DIR / "summary.csv", index=False)
 
-    # Comparacion emparejada: mejor modelo con embeddings frente al mejor
-    # baseline. Es la pregunta central del proyecto (docs/06, ultima seccion).
-    emb_tags = [t for t in summary.tag if t.startswith("facebook_")]
-    base_tags = [t for t in summary.tag if not t.startswith("facebook_")]
-    if emb_tags and base_tags:
-        best_emb = summary[summary.tag.isin(emb_tags)].iloc[0].tag
-        best_base = summary[summary.tag.isin(base_tags)].iloc[0].tag
+    # Comparacion emparejada: la pregunta central del proyecto (docs/06).
+    #
+    # P-05: antes se tomaba `summary.iloc[0]`, es decir el mejor de 13 modelos
+    # ordenados por MCC **de test**, y se medía la diferencia en ese mismo test.
+    # Elegir en test y medir en test es winner's curse: la diferencia puntual
+    # sale inflada y el IC bootstrap NO lo corrige, porque el bootstrap no sabe
+    # que hubo una seleccion previa. Ademas contradecia dos compromisos escritos
+    # en este repositorio (docs/02 y el preregistro de docs/07).
+    #
+    # Ahora la seleccion es por validacion, y si las etiquetas preregistradas
+    # existen se usan esas directamente, que es lo que el preregistro promete.
+    best_emb, best_base, selection_basis = _select_comparison_pair(summary, val_scores_by_tag)
+    if best_emb and best_base:
         comparison = paired_difference(
             test_frames[best_emb],
             test_frames[best_base],
@@ -448,10 +545,17 @@ def evaluate_all() -> pd.DataFrame:
         )
         comparison["model_a"] = best_emb
         comparison["model_b"] = best_base
+        comparison["selected_on"] = selection_basis
+        comparison["selection_note"] = (
+            "Los dos modelos comparados se eligieron SIN mirar test. La tabla "
+            "summary.csv con los 13 modelos es descriptiva; la unica inferencia "
+            "del proyecto es esta comparacion emparejada. Ver docs/09, P-05."
+        )
         (METRICS_DIR / "comparison_embeddings_vs_baseline.json").write_text(
             json.dumps(comparison, indent=2, ensure_ascii=False), encoding="utf-8"
         )
-        print(f"\n[eval] {best_emb}  frente a  {best_base}")
+        print(f"\n[eval] comparacion preregistrada (seleccion: {selection_basis})")
+        print(f"[eval] {best_emb}  frente a  {best_base}")
         print(
             f"[eval] diferencia de {threshold_metric}: {comparison['difference']:+.4f} "
             f"[{comparison['ci_low']:+.4f}, {comparison['ci_high']:+.4f}]"

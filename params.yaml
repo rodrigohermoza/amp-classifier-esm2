@@ -23,10 +23,16 @@ split:
   # Orden de preferencia de herramientas: la primera disponible se usa.
   methods: [mmseqs2, cdhit, builtin]
   builtin:
-    # Jaccard minimo de 3-meros para que dos secuencias se alineen.
-    # Mas alto = mas rapido y mas falsos negativos de agrupacion.
+    # Prefiltro de k-meros: contencion minima |A inter B| / min(|A|,|B|) para
+    # que dos secuencias se alineen. Mas alto = mas rapido y mas falsos
+    # negativos de agrupacion, es decir MAS FUGA.
+    #
+    # Antes era un indice de Jaccard con umbral 0.15, y eso anulaba el umbral
+    # de identidad: el umbral efectivo era ~0.75 en vez de 0.40 (P-03). Jaccard
+    # castiga la diferencia de tamano, asi que un peptido corto contenido entero
+    # en uno largo se descartaba pese a tener identidad 1.00.
     kmer_size: 3
-    kmer_jaccard_prefilter: 0.15
+    kmer_prefilter: 0.05
 
 features:
   physchem_ph: 7.4

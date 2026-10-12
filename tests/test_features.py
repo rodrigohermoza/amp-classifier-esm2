@@ -142,3 +142,61 @@ class TestOtherDescriptors:
     def test_empty_sequence_does_not_crash(self):
         vec = physchem.physchem_vector("")
         assert np.all(np.isfinite(vec))
+
+
+class TestBomanIndex:
+    """Regresiones de P-08: la escala estaba equivocada.
+
+    Se usaba la interfacial de Wimley-White con el signo invertido en vez de las
+    energias de transferencia ciclohexano-agua de Radzicka y Wolfenden. Con la
+    tabla vieja LL-37 daba 0.35 en vez de ~3.0, un orden de magnitud, y la
+    arginina quedaba al nivel de la asparagina.
+    """
+
+    def test_ll37_matches_published_value(self):
+        """APD3 reporta ~2,9-3,0 kcal/mol para LL-37."""
+        assert 2.7 < physchem.boman_index(LL37) < 3.3
+
+    def test_magainin_matches_published_value(self):
+        assert 0.3 < physchem.boman_index(MAGAININ_2) < 0.55
+
+    def test_arginine_dominates_the_scale(self):
+        """Es lo que hace util al indice para AMPs cationicos.
+
+        Con la escala vieja la arginina quedaba por debajo del glutamato, justo
+        al reves de lo correcto.
+        """
+        assert physchem.RADZICKA_WOLFENDEN["R"] > physchem.RADZICKA_WOLFENDEN["E"]
+        assert physchem.RADZICKA_WOLFENDEN["R"] == max(physchem.RADZICKA_WOLFENDEN.values())
+        assert physchem.boman_index("RRRRRRRRRR") > physchem.boman_index("EEEEEEEEEE")
+
+    def test_aliphatic_residues_are_most_negative(self):
+        assert physchem.boman_index(POLY_L) < -4.0
+
+    def test_interfacial_hydrophobicity_is_a_separate_descriptor(self):
+        """La escala vieja se conserva, pero con su nombre correcto.
+
+        El triptofano, que se acumula en las interfaces de membrana, debe ser el
+        residuo con el valor mas alto.
+        """
+        assert physchem.WIMLEY_WHITE_INTERFACIAL["W"] == max(
+            physchem.WIMLEY_WHITE_INTERFACIAL.values()
+        )
+        assert physchem.interfacial_hydrophobicity("WWWWWW") > 0
+        assert physchem.interfacial_hydrophobicity("EEEEEE") < 0
+
+    def test_both_descriptors_are_in_the_vector(self):
+        assert "boman_index" in physchem.FEATURE_NAMES
+        assert "interfacial_hydrophobicity" in physchem.FEATURE_NAMES
+        assert len(physchem.physchem_vector(LL37)) == len(physchem.FEATURE_NAMES)
+
+
+class TestIsoelectricPointBounds:
+    """P-09 del informe de metodologia: el pI podia devolver el borde."""
+
+    def test_extremely_basic_peptide_does_not_return_interval_edge(self):
+        pi = physchem.isoelectric_point("R" * 40)
+        assert not np.isnan(pi)
+        assert (
+            abs(physchem.net_charge("R" * 40, pi)) < 0.01
+        ), "si devuelve el borde del intervalo en vez del pI, la carga no sera cero"

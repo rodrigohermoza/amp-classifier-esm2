@@ -102,10 +102,11 @@ download → cleaning → 40% clusters → ┬→ descriptors ┬→ models → 
 
 | Stage | What it does |
 |---|---|
-| **Split** | MMseqs2 at 40% identity; falls back to CD-HIT, then to a built-in greedy Python clustering with a k-mer prefilter. Whole clusters to train/val/test (70/15/15). |
-| **Baselines** | Amino acid composition (20 features) and 10 physicochemical descriptors (net charge via Henderson-Hasselbalch, GRAVY, Eisenberg hydrophobic moment, pI, Boman index…) with logistic regression, random forest and XGBoost. |
+| **Split** | MMseqs2 at 40% identity (required for publishable results); falls back to CD-HIT, then to a built-in Python clustering so the repo works freshly cloned. Whole clusters to train/val/test (70/15/15), with validation that aborts on degenerate splits. |
+| **Leakage audit** | Maximum identity of every test sequence against **all** of train, compared against a null distribution (the same sequences with residues shuffled). Reported leakage is the **excess over null**, because identity between short peptides has a ~33% background floor. |
+| **Baselines** | Amino acid composition (20 features) and 11 physicochemical descriptors (net charge via Henderson-Hasselbalch, GRAVY, Eisenberg hydrophobic moment, pI, Boman index…) with logistic regression, random forest and XGBoost. |
 | **Embeddings** | ESM-2 8M and 35M, per-residue mean pooling with explicit masking of padding and special tokens, cached on disk. Logistic regression and a small MLP on top. |
-| **Evaluation** | ROC-AUC, PR-AUC, MCC and F1 with 95% CIs from cluster bootstrap. Threshold selected on validation. Paired comparison between the best embedding model and the best baseline. |
+| **Evaluation** | ROC-AUC, PR-AUC, MCC and F1 with 95% CIs from cluster bootstrap. Threshold selected on validation. Paired comparison between the **pre-registered** pair, never between the test winners. |
 | **Interpretation** | UMAP by class, source and split; error analysis by category, source and length. |
 
 The physicochemical scales are written out explicitly and cited in
@@ -131,7 +132,8 @@ turned out well:
 - Primary model: **ESM-2 35M + logistic regression**.
 - Primary baseline: **composition + physicochemical with XGBoost**.
 - Primary metric: **MCC** on test, with cluster bootstrap CIs.
-- Test is evaluated **once**, at the end.
+- Test is evaluated **once**, at the end. The full model table is descriptive;
+  the only inference in the project is the paired comparison of that pair.
 - My expectation: embeddings should win, but by a modest margin (perhaps
   0.02–0.04 ROC-AUC), and the intervals may overlap. If the margin comes out
   large, the first thing to suspect is leakage, not success.
@@ -160,8 +162,9 @@ make interpret   # UMAP and error analysis
 ```
 
 `ampesm info` shows which artifacts exist and which are missing. Everything runs
-on CPU on an Apple Silicon Mac. Clustering is optionally faster with
-`brew install mmseqs2` (~30 MB).
+on CPU on an Apple Silicon Mac. Two Homebrew packages are needed:
+`brew install mmseqs2` (~30 MB, required for publishable results) and
+`brew install libomp` (~2 MB, XGBoost will not load on macOS without it).
 
 ## Documentation
 

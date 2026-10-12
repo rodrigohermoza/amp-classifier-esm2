@@ -54,3 +54,9 @@ ignore = ["B905"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Los tests importan ampesm desde src sin depender del instalable editable.
+# Motivo (P-13): el archivo .pth del editable dejo de procesarse en el entorno
+# y los 115 tests pasaron a fallar en la coleccion con "No module named
+# ampesm", que parece un error del proyecto y no del entorno. Con esto, un
+# entorno a medio instalar no se confunde con codigo roto.
+pythonpath = ["src"]

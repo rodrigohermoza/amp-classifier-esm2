@@ -268,6 +268,17 @@ def build_dataset(keys: list[str] | None = None) -> pd.DataFrame:
         }
     )
 
+    # P-10b: la deduplicacion es por secuencia, no por id, asi que dos
+    # secuencias distintas bajo el mismo accession dejan ids repetidos. Mas
+    # abajo en la tuberia eso pisaria una de las dos en silencio, asi que se
+    # desambigua aqui con los primeros caracteres del hash de la secuencia.
+    dup_mask = df.id.duplicated(keep=False)
+    n_dups = int(dup_mask.sum())
+    if n_dups:
+        df.loc[dup_mask, "id"] = df.loc[dup_mask, "id"] + "#" + df.loc[dup_mask, "seq_sha1"].str[:8]
+        print(f"[limpieza] {n_dups} ids duplicados desambiguados con el hash de la secuencia")
+    duplicate_ids_fixed = n_dups
+
     if dcfg.get("match_negative_lengths", True):
         ratio = dcfg.get("negative_ratio")
         df, match_report = match_lengths(df, ratio, params.seed)
@@ -278,6 +289,22 @@ def build_dataset(keys: list[str] | None = None) -> pd.DataFrame:
     else:
         match_report = {"applied": False}
 
+    # P-10c: un conjunto vacio o de una sola clase llega a np.vstack([]) dos
+    # etapas mas tarde y falla con "need at least one array to concatenate",
+    # que no dice nada sobre la causa real.
+    if df.empty:
+        raise RuntimeError(
+            "El conjunto quedo vacio tras los filtros. Revisa que las fuentes se "
+            "descargaran bien y los limites de longitud en params.yaml."
+        )
+    if df.label.nunique() < 2:
+        solo = "positivos" if df.label.iloc[0] == 1 else "negativos"
+        raise RuntimeError(
+            f"El conjunto solo tiene {solo}. Hacen falta ambas clases: revisa que "
+            f"se incluyan fuentes positivas (apd3, dramp, uniprot_amp) y negativas "
+            f"(uniprot_neg). Fuentes usadas: {sorted(df.source.unique())}."
+        )
+
     df.to_csv(PEPTIDES_PATH, index=False)
 
     report = {
@@ -286,6 +313,7 @@ def build_dataset(keys: list[str] | None = None) -> pd.DataFrame:
         "parse": parse_reports,
         "filters": filter_stats.to_dict(),
         "deduplicate": dedup_report,
+        "duplicate_ids_disambiguated": duplicate_ids_fixed,
         "length_matching": match_report,
         "final": {
             "n_total": int(len(df)),

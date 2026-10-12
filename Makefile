@@ -32,7 +32,10 @@ test:
 data:
 	$(PY) ampesm data
 
+# Borra las predicciones a proposito: una division nueva las invalida, y
+# cruzarlas con los splits nuevos produce el fallo de P-10a.
 split:
+	rm -rf results/metrics/predictions
 	$(PY) ampesm split
 
 baselines:
@@ -53,7 +56,8 @@ interpret:
 all: data split baselines embeddings train evaluate interpret
 
 clean:
-	rm -rf results/figures/*.png results/metrics/*.json results/metrics/*.csv results/models/*
+	rm -rf results/figures/*.png results/metrics/*.json results/metrics/*.csv \
+	       results/metrics/predictions results/models/*
 	touch results/figures/.gitkeep results/metrics/.gitkeep results/models/.gitkeep
 
 clean-data:

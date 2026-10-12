@@ -136,10 +136,17 @@ def compute_embeddings(
     print(f"[embeddings] a calcular: {len(todo)} de {len(sequences)} (resto en cache)")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=str(hf_cache_dir()))
+    # add_pooling_layer=False evita un aviso llamativo y enganoso al cargar:
+    # "Some weights of EsmModel were not initialized ... You should probably
+    # TRAIN this model". El pooler es una capa extra que el checkpoint de ESM-2
+    # no trae y que este proyecto no usa, porque la agregacion se hace a mano
+    # sobre last_hidden_state. Sin esta opcion, el aviso sugiere que algo esta
+    # mal cuando no lo esta.
     model = AutoModel.from_pretrained(
         model_name,
         cache_dir=str(hf_cache_dir()),
         output_hidden_states=(layer != "last"),
+        add_pooling_layer=False,
     )
     model.eval()
     model.to(device)

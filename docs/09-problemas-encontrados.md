@@ -78,7 +78,7 @@ y cambio el alcance del proyecto; descubrirlo en la etapa 5 habria costado dias.
 ---
 
 ## P-03 — El prefiltro de k-meros anulaba el umbral de identidad del 40%
-**Fecha:** 2026-10-11 · **Estado:** sin resolver, identificado antes de la primera corrida
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Sintoma:** ninguno visible. Es el peor tipo de error: todo pasa, los tests
 pasan, y las metricas saldrian infladas sin ningun aviso.
@@ -134,6 +134,14 @@ proyecto estaba rota.
 4. Anadir la verificacion que falta y que vale mas que cualquier ajuste de
    parametros (ver P-04).
 
+**Resuelto asi:** los cuatro puntos. El prefiltro usa contencion con umbral
+0.05; `build_splits` avisa de forma ruidosa y marca `publishable: false` en el
+reporte cuando se usa el respaldo; se anadieron `-s 7.5` y
+`--alignment-mode 3` a MMseqs2 por el mismo motivo (su prefiltro por defecto
+tambien pierde pares a 40% en peptidos cortos); y se implemento la auditoria de
+P-04. Tests de regresion en `TestPrefilterRegression`, incluido el 6-mero
+contenido en un 50-mero.
+
 **Leccion:** un test puede verificar correctamente un invariante y aun asi dejar
 pasar el fallo que ese invariante pretendia prevenir, porque el invariante estaba
 puesto en el eslabon equivocado de la cadena. Documentar un parametro como
@@ -144,7 +152,7 @@ escondida y mas estricta que la declarada.
 ---
 
 ## P-04 — Falta la verificacion directa de la premisa del proyecto
-**Fecha:** 2026-10-11 · **Estado:** sin resolver
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Sintoma:** `docs/04` afirma que "ninguna secuencia de prueba tiene un pariente
 cercano en entrenamiento". Nada en el codigo lo comprueba.
@@ -168,10 +176,17 @@ diferencia entre "dividimos por clusteres, asi que no hay fuga" y "el 0,3% de
 las secuencias de test tiene un pariente por encima del 40% en train, y aqui
 esta el histograma".
 
+**Resuelto asi:** `audit_train_test_identity` en `split.py`, que corre dentro de
+`build_splits` y escribe su resultado en `split_report.json`: distribucion de
+identidades maximas, histograma, lista de casos por encima del umbral y la
+distribucion nula de P-12. Al correrla sobre datos sinteticos aparecio
+inmediatamente el problema de interpretacion que documenta P-12, asi que la
+auditoria ya demostro su valor antes de tocar datos reales.
+
 ---
 
 ## P-05 — El modelo de la comparacion principal se elegia por su resultado en test
-**Fecha:** 2026-10-11 · **Estado:** sin resolver
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Sintoma:** ninguno visible.
 
@@ -192,6 +207,14 @@ Contradice dos compromisos escritos en este mismo repositorio: el de `docs/02`
 las dos etiquetas preregistradas y dejar el resto de la tabla como descriptiva,
 diciendolo en el README.
 
+**Resuelto asi:** `_select_comparison_pair` en `evaluate.py` elige por este
+orden: (1) las dos etiquetas preregistradas en docs/07 si existen entre las
+predicciones, (2) el mejor de cada familia por ROC-AUC de **validacion**. El
+JSON de la comparacion incluye `selected_on` para que quede por escrito cual se
+uso. Lo mismo en `interpret.py`, que elige el modelo a interpretar leyendo los
+`val_roc_auc` de `results/models/*.json`. Verificado en la corrida sintetica:
+eligio el par preregistrado aunque no era el mejor en test.
+
 **Leccion:** escribir el compromiso previo no basta si el codigo que produce el
 numero no lo implementa. El preregistro y la implementacion tienen que apuntar
 al mismo sitio, y aqui no lo hacian.
@@ -199,7 +222,7 @@ al mismo sitio, y aqui no lo hacian.
 ---
 
 ## P-06 — `assign_splits` podia dejar un split vacio o de una sola clase, en silencio
-**Fecha:** 2026-10-11 · **Estado:** sin resolver
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Causa:** la heuristica arranca con deficit 1.0 en los tres splits y pondera el
 balance de clases con peso 0.5, asi que los primeros clusteres grandes se
@@ -219,14 +242,21 @@ mitad de la rejilla de hiperparametros, perdiendo todo el entrenamiento. Con tes
 monoclase es peor: ROC-AUC sale NaN y MCC sale 0.0 **sin aviso**, y se
 publicarian numeros basura.
 
-**Correccion pendiente:** validar y abortar antes de escribir `splits.csv` (mismo
-patron que ya se usa para la fuga: mejor no escribir el archivo que escribir uno
-invalido), y convertir el balance de clases en restriccion y no en penalizacion.
+**Resuelto asi:** dos cambios. `assign_splits` siembra primero cada split con un
+cluster de cada clase, eligiendo los mas pequenos para no gastar la cuota, y
+solo despues reparte por deficit. Y `build_splits` valida antes de escribir:
+cada split con ambas clases, al menos 20 positivos y al menos 10 clusteres (por
+debajo de eso el bootstrap por cluster no significa nada).
+
+**Limite que no se puede arreglar, y es correcto que no se pueda:** si solo hay
+dos clusteres con positivos, no existe reparto valido para tres splits sin
+partir un cluster, que seria fuga. En ese caso la validacion aborta con un
+mensaje que explica la causa. Un test documenta el caso explicitamente.
 
 ---
 
 ## P-07 — El manejo de NaN del bootstrap solo cubria ROC-AUC
-**Fecha:** 2026-10-11 · **Estado:** sin resolver
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Sintoma:** el docstring de `all_metrics` afirma que un remuestreo monoclase
 devuelve NaN y el percentil lo ignora. Es falso para cinco de las seis metricas.
@@ -245,15 +275,16 @@ de PR-AUC y de MCC, que son las dos metricas principales del proyecto. En
 `paired_difference` un remuestreo degenerado aporta un cero exacto, que contrae
 el intervalo hacia "no distinguible".
 
-**Correccion pendiente:** detectar `len(np.unique(y)) < 2` **antes** de calcular
-y devolver NaN para todas las metricas; registrar `n_boot_valid` por metrica y
-avisar si se descarta mas del 1%, porque descartar remuestreos condiciona el
-intervalo y hoy no queda rastro de cuantos se fueron.
+**Resuelto asi:** `all_metrics` comprueba `len(y) == 0 or len(np.unique(y)) < 2`
+antes de calcular nada y devuelve NaN para las siete metricas. El bootstrap
+registra `n_boot_valid` y `n_boot_requested` por metrica y avisa si descarta mas
+del 1%. Y `choose_threshold` ahora lanza una excepcion con validacion vacia o
+monoclase, en vez de devolver el score mas bajo como umbral.
 
 ---
 
 ## P-08 — `boman_index` usaba la escala equivocada
-**Fecha:** 2026-10-11 · **Estado:** sin resolver
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Causa:** la tabla `TRANSFER_FREE_ENERGY` es, residuo a residuo, la escala
 **interfacial de Wimley-White** con el signo invertido (se identifica por W=1.85,
@@ -271,10 +302,13 @@ y la magainina-2 ≈0.42. Un orden de magnitud de diferencia.
 en realidad una hidrofobicidad interfacial media con el signo cambiado, es decir
 casi un duplicado de GRAVY.
 
-**Correccion pendiente:** sustituir por la escala de Radzicka y Wolfenden sin
-invertir el signo, con un test de regresion de LL-37 ≈ 3.0. Si se quiere
-conservar la escala actual como descriptor adicional, renombrarla a
-`interfacial_hydrophobicity` y no llamarla Boman.
+**Resuelto asi:** ambas cosas. `RADZICKA_WOLFENDEN` sustituye a la tabla
+anterior y `boman_index` ya no invierte el signo; verificado, LL-37 da
+exactamente **3.00** y la magainina-2 **0.42**, que son los valores publicados.
+La escala de Wimley-White se conserva con su nombre correcto como un descriptor
+nuevo, `interfacial_hydrophobicity`, asi que los descriptores fisicoquimicos
+pasan de 10 a 11. Tests de regresion contra los valores de la literatura y
+contra el orden de la escala (la arginina debe dominar).
 
 **Leccion:** el objetivo declarado de escribir las escalas explicitas en el
 archivo era que fueran auditables contra la fuente. Funciono: una auditoria las
@@ -285,7 +319,7 @@ faciles (carga, momento) y no este.
 ---
 
 ## P-09 — XGBoost no carga: falta libomp
-**Fecha:** 2026-10-11 · **Estado:** sin resolver, requiere instalacion
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 **Sintoma:** al ejecutar la etapa de baselines:
 
@@ -303,13 +337,15 @@ trabajo se pierde. `XGBoostError` hereda de `ValueError`, asi que el CLI lo
 captura y termina con codigo 1 y un mensaje poco informativo. Ningun test cubre
 XGBoost, por eso los 89 pasaban.
 
-**Correccion pendiente:** `brew install libomp` (~2 MB), y envolver el import
-para degradar con aviso en vez de abortar toda la etapa.
+**Resuelto asi:** `brew install libomp` instalado, y el import envuelto en una
+excepcion propia, `ModelUnavailable`, que `run_baselines` captura para seguir
+con los demas modelos en vez de abortar la etapa. Perder XGBoost debe costar un
+baseline, no la corrida entera. Verificado: los 9 baselines entrenan.
 
 ---
 
 ## P-10 — Guardas que faltan, encontradas ejecutando la tuberia
-**Fecha:** 2026-10-11 · **Estado:** sin resolver
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 Hallazgos de una corrida real sobre datos sinteticos. Ninguno es grave por si
 solo; juntos son la diferencia entre una tuberia que falla con un mensaje util y
@@ -325,6 +361,17 @@ una que falla con una traza.
 | f | `interpret.py` calcula los descriptores con los valores por defecto en vez de los de `params.yaml` | Si se cambia el pH o la ventana, el analisis de errores describe los peptidos con descriptores distintos de los que vio el modelo |
 | g | Los bins de longitud estan cableados `[4,10,20,30,40,51]` | Si `max_length` sube de 50, los peptidos mas largos desaparecen del reporte en silencio |
 | h | `ampesm all` omite la etapa `embeddings` que el `Makefile` si incluye | Cosmetico: una pausa larga e inesperada dentro de `train` |
+
+**Resuelto asi:** las ocho. (a) se valida el cruce y `TypeError` se anade a las
+excepciones que captura el CLI; ademas `make split` y `make clean` borran las
+predicciones, porque una division nueva las invalida. (b) los ids duplicados se
+desambiguan en `clean.py` con los 8 primeros caracteres del hash de la
+secuencia, y `split.py` conserva una comprobacion de seguridad. (c) `clean.py`
+aborta con un mensaje util si el conjunto queda vacio o de una sola clase.
+(d) `choose_threshold` lanza excepcion en vez de devolver `-inf`. (e) se validan
+las claves y la suma de `fractions`. (f) `interpret.py` lee `params.yaml`.
+(g) los bins de longitud se derivan de `max_length`. (h) `ampesm all` incluye
+`embeddings`.
 
 ---
 
@@ -349,6 +396,82 @@ es el alineamiento, es el prefiltro. Como los candidatos vienen ordenados por
 k-meros compartidos y esa cuenta es una cota superior del Jaccard, se puede
 cortar el bucle en cuanto la cota baje del umbral en vez de seguir recorriendo.
 Importa poco a 26 s, pero pagara cuando se baje el umbral del prefiltro (P-03).
+
+---
+
+## P-12 — La auditoria de fuga daba un numero ininterpretable sin distribucion nula
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+Este salio de correr la auditoria recien escrita de P-04 sobre datos
+sinteticos, y es el hallazgo mas instructivo de la sesion: **una verificacion
+puede ser correcta y aun asi llevar a la conclusion contraria si no se compara
+contra un control.**
+
+**Sintoma:** la primera corrida de la auditoria dijo que el **29,3%** de las
+secuencias de test tenian identidad >= 0.4 contra train. Leido tal cual, eso
+significaria que la division por clusteres no sirve de nada y que todo el
+proyecto esta roto.
+
+**Causa:** la metrica de identidad tiene un ruido de fondo alto en peptidos
+cortos. Con alineamiento global, huecos permitidos y normalizacion por la
+secuencia mas corta, dos peptidos **sin ninguna relacion** alinean al 0.33 de
+identidad de media, y uno de cada tres supera el 0.4 por puro azar. El umbral
+del 40% esta **dentro del ruido** de la propia metrica.
+
+Lo que delataba que algo no cuadraba: la identidad maxima observada era 0.54 y
+no habia ni un solo caso por encima de 0.6. Las familias sinteticas se
+construyeron con 0 a 2 mutaciones, asi que un pariente real habria dado ~0.95.
+Si hubiera habido fuga de verdad, se veria en la cola alta del histograma, y la
+cola alta estaba vacia.
+
+**Resuelto asi:** la auditoria calcula ahora una **distribucion nula**. Baraja
+los residuos de cada secuencia de test, lo que conserva longitud y composicion
+exactas (que es lo que determina la identidad de fondo) y destruye cualquier
+parentesco real, y repite la medicion. Se reportan tres numeros:
+
+- `fraction_over_threshold`: el crudo, 29,3%.
+- `null_model.fraction_over_threshold`: el ruido de fondo, 30,4%.
+- `excess_over_null`: la diferencia, **-1,1%**. Este es el que mide fuga.
+
+Y un `suggested_threshold_above_noise` (el percentil 99 del nulo, 0.62) por
+encima del cual un parecido ya no se explica por azar: 0 secuencias de 92.
+
+Conclusion correcta: **no hay fuga detectable**, justo lo contrario de lo que
+sugeria el numero crudo.
+
+**Leccion:** un numero sin su control no es evidencia, es una cifra. Es la misma
+leccion que el proyecto predica para las metricas de clasificacion (de ahi los
+baselines y los intervalos de confianza) y casi se incumple en la propia
+herramienta de diagnostico. Si se hubiera publicado el 29% sin el nulo, habria
+sido un error vergonzoso y perfectamente evitable.
+
+---
+
+## P-13 — Los 114 tests fallaron de golpe por el entorno, no por el codigo
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+**Sintoma:** a mitad de la sesion, los tests pasaron de pasar todos a fallar
+todos en la coleccion con `ModuleNotFoundError: No module named 'ampesm'`.
+
+**Causa:** la instalacion editable de `uv` deja un archivo
+`_editable_impl_ampesm.pth` en `site-packages` que anade `src/` a `sys.path`.
+En ese entorno los archivos `.pth` **dejaron de procesarse** por completo: ni
+el del proyecto ni los de `virtualenv` o `distutils`. El archivo era correcto y
+apuntaba a una carpeta existente; simplemente `site` no lo leia. En un entorno
+creado desde cero con `python -m venv` el mismo mecanismo funcionaba, asi que
+era ese `.venv` concreto y no la maquina.
+
+**Resuelto asi:** dos cosas, y la segunda importa mas que la primera.
+
+1. Se recreo el entorno, que lo arreglo.
+2. Se anadio `pythonpath = ["src"]` a la configuracion de pytest, de modo que
+   los tests importen el paquete directamente desde `src/` sin depender del
+   instalable editable.
+
+**Leccion:** un fallo del entorno que se presenta como un fallo del codigo cuesta
+mucho mas de lo que deberia, porque uno empieza buscando en el sitio
+equivocado. Que los tests no dependan del estado de la instalacion es barato y
+evita exactamente esa confusion a quien clone el repositorio.
 
 ## Plantilla para entradas nuevas
 

@@ -88,6 +88,10 @@ def _cmd_all(args: argparse.Namespace) -> None:
     _cmd_data(args)
     _cmd_split(args)
     _cmd_baselines(args)
+    # P-10h: la etapa de embeddings iba implicita dentro de train, asi que
+    # 'ampesm all' y 'make all' no hacian lo mismo y el usuario veia una pausa
+    # larga e inexplicada dentro de train.
+    _cmd_embeddings(args)
     _cmd_train(args)
     _cmd_evaluate(args)
     _cmd_interpret(args)
@@ -200,7 +204,9 @@ def main(argv: list[str] | None = None) -> int:
     start = time.perf_counter()
     try:
         args.func(args)
-    except (FileNotFoundError, RuntimeError, ValueError, KeyError) as exc:
+    # TypeError incluido por P-10a: un cruce con datos rancios lo produce y
+    # salia como traza cruda en vez de mensaje.
+    except (FileNotFoundError, RuntimeError, ValueError, KeyError, TypeError) as exc:
         # Los errores previstos se muestran como mensaje, no como traza: casi
         # siempre son "falta una etapa anterior" o "una fuente cambio".
         print(f"\nError: {exc}", file=sys.stderr)

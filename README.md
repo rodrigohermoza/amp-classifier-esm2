@@ -107,17 +107,19 @@ descarga → limpieza → clústeres al 40% → ┬→ descriptores ┬→ model
 
 | Etapa | Qué hace |
 |---|---|
-| **División** | MMseqs2 al 40% de identidad; si no está instalado, CD-HIT; si tampoco, un clustering voraz propio en Python con prefiltro de k-meros. Clústeres completos a train/val/test (70/15/15). |
-| **Baselines** | Composición de aminoácidos (20 features) y 10 descriptores fisicoquímicos (carga neta por Henderson-Hasselbalch, GRAVY, momento hidrofóbico de Eisenberg, pI, índice de Boman…) con regresión logística, random forest y XGBoost. |
+| **División** | MMseqs2 al 40% de identidad (obligatorio para resultados publicables); respaldo en CD-HIT y en un clustering propio en Python para que el repo funcione recién clonado. Clústeres completos a train/val/test (70/15/15), con validación que aborta si algún split queda degenerado. |
+| **Auditoría de fuga** | Identidad máxima de cada secuencia de test contra **todo** train, comparada contra una distribución nula (las mismas secuencias con los residuos barajados). Lo que se reporta como fuga es el **exceso sobre el nulo**, porque la identidad entre péptidos cortos tiene un ruido de fondo del ~33%. |
+| **Baselines** | Composición de aminoácidos (20 features) y 11 descriptores fisicoquímicos (carga neta por Henderson-Hasselbalch, GRAVY, momento hidrofóbico de Eisenberg, pI, índice de Boman…) con regresión logística, random forest y XGBoost. |
 | **Embeddings** | ESM-2 8M y 35M, media por residuo con máscara explícita de relleno y tokens especiales, cacheados en disco. Logística y un MLP pequeño encima. |
-| **Evaluación** | ROC-AUC, PR-AUC, MCC y F1 con IC del 95% por bootstrap de clústeres. Umbral elegido en validación. Comparación emparejada entre el mejor modelo con embeddings y el mejor baseline. |
+| **Evaluación** | ROC-AUC, PR-AUC, MCC y F1 con IC del 95% por bootstrap de clústeres. Umbral elegido en validación. Comparación emparejada entre el par **preregistrado**, nunca entre los ganadores en test. |
 | **Interpretación** | UMAP por clase, fuente y split; análisis de errores por categoría, fuente y longitud. |
 
 Las escalas fisicoquímicas están escritas explícitas y citadas en
 [`physchem.py`](src/ampesm/features/physchem.py), para que se puedan auditar sin
 salir del repositorio y para que los números no cambien si una librería cambia
 de versión. Verificadas contra valores publicados: magainina-2 da +3,0 de carga
-neta a pH 7,4 (publicado +3 a +4) y LL-37 da +5,9 (publicado +6).
+neta a pH 7,4 (publicado +3 a +4), LL-37 da +5,9 (publicado +6) y el índice de
+Boman de LL-37 da 3,0 (publicado 2,9–3,0).
 
 ## Resultados
 
@@ -136,7 +138,9 @@ salió bien:
 - Modelo principal: **ESM-2 35M + regresión logística**.
 - Baseline principal: **composición + fisicoquímicos con XGBoost**.
 - Métrica principal: **MCC** en prueba, con IC por bootstrap de clústeres.
-- Prueba se evalúa **una sola vez**, al final.
+- Prueba se evalúa **una sola vez**, al final. La tabla con todos los modelos
+  es descriptiva; la única inferencia del proyecto es la comparación emparejada
+  entre ese par, elegido por preregistro y no por su resultado en prueba.
 - Mi expectativa: los embeddings deberían ganar, pero por un margen modesto
   (quizá 0,02–0,04 de ROC-AUC), y puede que los intervalos se solapen. Si el
   margen sale enorme, lo primero que hay que sospechar es fuga de información,
@@ -166,8 +170,9 @@ make interpret   # UMAP y análisis de errores
 ```
 
 `ampesm info` muestra qué artefactos existen y qué falta. Todo corre en CPU en un
-Mac con Apple Silicon. Clustering opcionalmente más rápido con
-`brew install mmseqs2` (~30 MB).
+Mac con Apple Silicon. Hacen falta dos cosas de Homebrew:
+`brew install mmseqs2` (~30 MB, obligatorio para resultados publicables) y
+`brew install libomp` (~2 MB, sin ella XGBoost no carga en macOS).
 
 ## Estructura
 
@@ -182,7 +187,7 @@ src/ampesm/
   evaluate.py      métricas, bootstrap, figuras
   interpret.py     UMAP y análisis de errores
 docs/              cuaderno de laboratorio: decisiones, errores, mejoras
-tests/             80 casos; los descriptores se validan contra literatura
+tests/             114 casos; los descriptores se validan contra literatura
 params.yaml        todo lo ajustable en un solo archivo
 ```
 

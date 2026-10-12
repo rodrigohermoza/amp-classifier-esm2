@@ -32,6 +32,14 @@ from .features import composition, physchem
 PREDICTIONS_DIR = METRICS_DIR / "predictions"
 
 
+class ModelUnavailable(RuntimeError):
+    """Un modelo no se puede usar en esta maquina por una dependencia ausente.
+
+    Se distingue de un error de datos para que la etapa pueda continuar con los
+    demas modelos en vez de abortar entera.
+    """
+
+
 # --- Representaciones ------------------------------------------------------
 
 
@@ -120,7 +128,18 @@ def make_estimator(kind: str, hp: dict, seed: int):
             random_state=seed,
         )
     if kind == "xgboost":
-        from xgboost import XGBClassifier
+        # P-09: la rueda de XGBoost para macOS depende de la OpenMP de Homebrew,
+        # que uv no instala porque no es un paquete de Python. Sin ella el import
+        # lanza XGBoostError, que hereda de ValueError y el CLI capturaba como si
+        # fuera un error de datos, abortando la etapa con un mensaje inutil
+        # DESPUES de haber entrenado otros modelos.
+        try:
+            from xgboost import XGBClassifier
+        except Exception as exc:  # noqa: BLE001 - el error concreto varia por plataforma
+            raise ModelUnavailable(
+                f"xgboost no se puede cargar ({exc}). En macOS: 'brew install libomp'. "
+                "Tambien puedes quitar xgboost de params.yaml."
+            ) from exc
 
         return XGBClassifier(
             n_estimators=int(hp.get("n_estimators", 300)),
@@ -349,13 +368,22 @@ def run_baselines() -> list[TrainResult]:
     params = load_params()
     df = load_splits()
     results = []
+    unavailable: set[str] = set()
 
     for representation in ("composition", "physchem", "comp_physchem"):
         x, _names = get_feature_matrix(df, representation, params)
         print(f"[baselines] {representation}: matriz {x.shape}")
         for model_kind in ("logreg", "random_forest", "xgboost"):
             grid = params.models.get(model_kind, {})
-            result = train_one(df, x, representation, model_kind, grid, params.seed)
+            try:
+                result = train_one(df, x, representation, model_kind, grid, params.seed)
+            except ModelUnavailable as exc:
+                # Se avisa una vez por modelo y se sigue: perder XGBoost es
+                # perder un baseline, no la etapa entera.
+                if model_kind not in unavailable:
+                    print(f"[baselines]   AVISO: se omite {model_kind}: {exc}")
+                    unavailable.add(model_kind)
+                continue
             save_result(result)
             print(
                 f"[baselines]   {model_kind:14s} val ROC-AUC {result.val_roc_auc:.4f}  "

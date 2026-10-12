@@ -2,9 +2,13 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.metrics import roc_auc_score
 
 from ampesm.evaluate import (
+    PREREGISTERED_BASELINE,
+    PREREGISTERED_EMBEDDING,
+    _select_comparison_pair,
     all_metrics,
     bootstrap_metrics,
     choose_threshold,
@@ -57,10 +61,23 @@ class TestMetrics:
         scores = np.array([0.9, 0.8, 0.2, 0.1])
         assert all_metrics(y, scores, 0.5)["roc_auc"] == 0.0
 
-    def test_single_class_gives_nan_auc_not_crash(self):
-        """Pasa de verdad en un remuestreo bootstrap; no debe reventar."""
-        metrics = all_metrics(np.array([1, 1, 1]), np.array([0.2, 0.5, 0.9]), 0.5)
-        assert np.isnan(metrics["roc_auc"])
+    def test_single_class_gives_nan_for_every_metric(self):
+        """Regresion de P-07.
+
+        Antes solo roc_auc daba NaN, porque es la unica metrica que lanza
+        excepcion. PR-AUC devolvia 1.0, MCC devolvia 0.0 y los guardas daban
+        0.0, y todos esos valores entraban en los intervalos de confianza de
+        las dos metricas principales del proyecto.
+        """
+        for y in (np.array([1, 1, 1]), np.array([0, 0, 0])):
+            metrics = all_metrics(y, np.array([0.2, 0.5, 0.9]), 0.5)
+            assert all(
+                np.isnan(v) for v in metrics.values()
+            ), f"con y={y.tolist()} deberian ser todas NaN, salieron {metrics}"
+
+    def test_empty_input_gives_nan_not_indexerror(self):
+        metrics = all_metrics(np.array([]), np.array([]), 0.5)
+        assert all(np.isnan(v) for v in metrics.values())
 
     def test_sensitivity_and_specificity(self):
         y = np.array([0, 0, 0, 0, 1, 1, 1, 1])
@@ -170,3 +187,78 @@ class TestPairedDifference:
             assert "alinean" in str(exc)
         else:
             raise AssertionError("se esperaba ValueError al cruzar predicciones desalineadas")
+
+
+class TestThresholdGuards:
+    """Regresiones de P-10d: umbrales degenerados en silencio."""
+
+    def test_empty_validation_raises(self):
+        with pytest.raises(ValueError, match="vacio"):
+            choose_threshold(np.array([]), np.array([]), "mcc")
+
+    def test_single_class_validation_raises(self):
+        """Antes devolvia el score MAS BAJO de val, que en test predice casi
+        todo positivo, sin que nada avisara."""
+        with pytest.raises(ValueError, match="una sola clase"):
+            choose_threshold(np.array([1, 1, 1]), np.array([0.9, 0.8, 0.7]), "mcc")
+
+
+class TestBootstrapBookkeeping:
+    """P-07: descartar remuestreos condiciona el IC, asi que hay que contarlos."""
+
+    def test_reports_valid_bootstrap_count(self):
+        df = make_predictions(separation=0.4, seed=3)
+        result = bootstrap_metrics(df, 0.5, n_boot=100, unit="cluster", seed=42)
+        for name, values in result.items():
+            assert values["n_boot_requested"] == 100, name
+            assert 0 <= values["n_boot_valid"] <= 100, name
+
+
+class TestComparisonPairSelection:
+    """Regresiones de P-05: el par se elegia por su resultado en test."""
+
+    def _summary(self, tags):
+        return pd.DataFrame({"tag": tags, "mcc": np.linspace(0.9, 0.5, len(tags))})
+
+    def test_preregistered_pair_wins_when_present(self):
+        tags = [
+            PREREGISTERED_EMBEDDING,
+            "facebook_esm2_t6_8M_UR50D__mlp",
+            PREREGISTERED_BASELINE,
+            "composition__logreg",
+        ]
+        # Val deliberadamente favorable a los NO preregistrados: el preregistro
+        # debe ganar de todas formas.
+        val = {
+            PREREGISTERED_EMBEDDING: 0.70,
+            "facebook_esm2_t6_8M_UR50D__mlp": 0.99,
+            PREREGISTERED_BASELINE: 0.70,
+            "composition__logreg": 0.99,
+        }
+        emb, base, basis = _select_comparison_pair(self._summary(tags), val)
+        assert emb == PREREGISTERED_EMBEDDING
+        assert base == PREREGISTERED_BASELINE
+        assert "preregistro" in basis
+
+    def test_falls_back_to_validation_not_test(self):
+        """Sin el par preregistrado, se elige por val y NUNCA por el orden de
+        summary, que esta ordenado por MCC de test."""
+        tags = ["facebook_a__logreg", "facebook_b__mlp", "composition__logreg", "physchem__logreg"]
+        summary = self._summary(tags)  # mcc de test: a > b > composition > physchem
+        val = {
+            "facebook_a__logreg": 0.60,
+            "facebook_b__mlp": 0.95,  # peor en test, mejor en val
+            "composition__logreg": 0.60,
+            "physchem__logreg": 0.95,  # peor en test, mejor en val
+        }
+        emb, base, basis = _select_comparison_pair(summary, val)
+        assert emb == "facebook_b__mlp"
+        assert base == "physchem__logreg"
+        assert "validacion" in basis
+
+    def test_missing_family_returns_none(self):
+        emb, base, basis = _select_comparison_pair(
+            self._summary(["composition__logreg"]), {"composition__logreg": 0.8}
+        )
+        assert emb is None and base is None
+        assert "no aplicable" in basis

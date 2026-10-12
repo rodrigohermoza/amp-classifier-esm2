@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ampesm.split import assign_splits, cluster_builtin, kmer_set
+from ampesm.split import (
+    assign_splits,
+    audit_train_test_identity,
+    cluster_builtin,
+    kmer_set,
+)
 
 FRACTIONS = {"train": 0.70, "val": 0.15, "test": 0.15}
 
@@ -122,7 +127,7 @@ class TestAssignSplits:
 class TestBuiltinClustering:
     def test_identical_sequences_cluster_together(self):
         seqs = {"a": "GIGKFLHSAKKFGKAFVGEIMNS", "b": "GIGKFLHSAKKFGKAFVGEIMNS"}
-        mapping = cluster_builtin(seqs, identity=0.4, coverage=0.5)
+        mapping, _ = cluster_builtin(seqs, identity=0.4, coverage=0.5)
         assert mapping["a"] == mapping["b"]
 
     def test_near_identical_sequences_cluster_together(self):
@@ -135,12 +140,12 @@ class TestBuiltinClustering:
             "wt": "GIGKFLHSAKKFGKAFVGEIMNS",
             "mut": "GIGKFLHSAKKFGKAFVGEIMAA",
         }
-        mapping = cluster_builtin(seqs, identity=0.4, coverage=0.5)
+        mapping, _ = cluster_builtin(seqs, identity=0.4, coverage=0.5)
         assert mapping["wt"] == mapping["mut"]
 
     def test_unrelated_sequences_stay_apart(self):
         seqs = {"cationic": "KKKKRRRRKKKKRRRR", "acidic": "DDDDEEEEDDDDEEEE"}
-        mapping = cluster_builtin(seqs, identity=0.4, coverage=0.5)
+        mapping, _ = cluster_builtin(seqs, identity=0.4, coverage=0.5)
         assert mapping["cationic"] != mapping["acidic"]
 
     def test_all_sequences_receive_a_cluster(self):
@@ -150,9 +155,187 @@ class TestBuiltinClustering:
                 ["GIGKFLHSAKKF", "GIGKFLHSAKKW", "DDDDEEEE", "WWWWWWWW", "KRKRKRKR"]
             )
         }
-        mapping = cluster_builtin(seqs, identity=0.4, coverage=0.5)
+        mapping, _ = cluster_builtin(seqs, identity=0.4, coverage=0.5)
         assert set(mapping) == set(seqs)
 
     def test_deterministic(self):
         seqs = {f"s{i}": s for i, s in enumerate(["GIGKFLHSAKKF", "GIGKFLHSAKKW", "DDDDEEEE"])}
-        assert cluster_builtin(seqs, 0.4, 0.5) == cluster_builtin(seqs, 0.4, 0.5)
+        assert cluster_builtin(seqs, 0.4, 0.5)[0] == cluster_builtin(seqs, 0.4, 0.5)[0]
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("Bio") is None,
+    reason="Biopython no instalado; el respaldo de clustering lo necesita",
+)
+class TestPrefilterRegression:
+    """Regresiones de P-03: el prefiltro anulaba el umbral de identidad.
+
+    El prefiltro viejo (Jaccard de 3-meros >= 0.15) era mas estricto que el
+    propio umbral del 40%, asi que los parientes que el umbral pretende agrupar
+    nunca llegaban a alinearse. Estos tests fijan el comportamiento corregido.
+    """
+
+    def test_short_peptide_contained_in_long_one_clusters(self):
+        """El caso que el prefiltro de Jaccard descartaba siempre.
+
+        Un 6-mero identico a un fragmento de un 50-mero tiene identidad 1.00 y
+        cobertura 1.00, pero su Jaccard de 3-meros contra el largo es ~0.07,
+        asi que con el umbral viejo nunca se alineaban. Con contencion, da 1.00.
+        """
+        largo = "GIGKFLHSAKKFGKAFVGEIMNSKKWWRRPLFVACDEGHIKLMNPQ"
+        corto = largo[10:16]
+        mapping, _ = cluster_builtin({"largo": largo, "corto": corto}, 0.4, 0.5)
+        assert (
+            mapping["largo"] == mapping["corto"]
+        ), "un peptido corto contenido entero en uno largo debe agruparse con el"
+
+    def test_moderately_diverged_pair_clusters(self):
+        """Dos secuencias con ~40-50% de identidad deben caer en el mismo cluster.
+
+        Es exactamente el rango que el umbral de 0.4 existe para capturar y el
+        que el prefiltro viejo descartaba en el 99-100% de los casos.
+        """
+        base = "GIGKFLHSAKKFGKAFVGEIMNS"
+        # Se mutan 11 de 23 posiciones -> ~52% de identidad.
+        mutada = list(base)
+        for i in range(0, len(base), 2):
+            mutada[i] = "A" if base[i] != "A" else "W"
+        mapping, _ = cluster_builtin({"base": base, "mut": "".join(mutada)}, 0.4, 0.5)
+        assert mapping["base"] == mapping["mut"]
+
+    def test_diagnostics_report_containment_criterion(self):
+        _mapping, diag = cluster_builtin({"a": "GIGKFLHSAKKF"}, 0.4, 0.5)
+        assert diag["prefilter_criterion"] == "containment"
+        assert diag["prefilter"] == 0.05
+
+    def test_truly_unrelated_still_separate(self):
+        """Bajar el prefiltro no debe fusionar secuencias sin relacion."""
+        seqs = {"cat": "KKKKRRRRKKKKRRRR", "aci": "DDDDEEEEDDDDEEEE", "aro": "WWWWFFFFWWWWFFFF"}
+        mapping, _ = cluster_builtin(seqs, 0.4, 0.5)
+        assert len(set(mapping.values())) == 3
+
+
+class TestDegenerateSplits:
+    """Regresiones de P-06: splits vacios o monoclase en silencio."""
+
+    def test_correlated_labels_still_give_both_classes(self):
+        """El caso real: familias de AMPs donde la etiqueta sigue al cluster.
+
+        Antes salia val con 0% de positivos y test con 100%. La siembra previa
+        garantiza ambas clases en cada split siempre que haya material para
+        ello, es decir al menos un cluster de cada clase por split.
+        """
+        rows = []
+        for cid in range(12):
+            label = 1 if cid < 6 else 0
+            for j in range(50):
+                rows.append({"id": f"s{cid}_{j}", "cluster_id": cid, "label": label})
+        df = pd.DataFrame(rows)
+
+        assignment = assign_splits(df, FRACTIONS, seed=42)
+        df["split"] = df.cluster_id.map(assignment)
+
+        for split in FRACTIONS:
+            sub = df[df.split == split]
+            assert len(sub) > 0, f"{split} quedo vacio"
+            assert sub.label.nunique() == 2, (
+                f"{split} tiene una sola clase: "
+                f"{int((sub.label == 1).sum())}+ / {int((sub.label == 0).sum())}-"
+            )
+
+    def test_too_few_positive_clusters_is_impossible_not_hidden(self):
+        """Con 2 clusteres positivos y 3 splits, no hay solucion valida.
+
+        Darle positivos a los tres splits exigiria partir un cluster, que es
+        precisamente la fuga que se quiere evitar. Lo correcto no es que
+        assign_splits haga magia, sino que la division resultante sea
+        detectable: la validacion de build_splits aborta antes de escribir
+        splits.csv. Este test documenta el limite y comprueba que al menos la
+        siembra reparte los positivos disponibles entre splits distintos en vez
+        de amontonarlos en uno.
+        """
+        rows = []
+        for cid in range(5):
+            label = 1 if cid < 2 else 0
+            for j in range(100):
+                rows.append({"id": f"s{cid}_{j}", "cluster_id": cid, "label": label})
+        df = pd.DataFrame(rows)
+
+        assignment = assign_splits(df, FRACTIONS, seed=42)
+        df["split"] = df.cluster_id.map(assignment)
+
+        splits_con_positivos = {
+            split for split in FRACTIONS if (df[df.split == split].label == 1).any()
+        }
+        assert len(splits_con_positivos) == 2, (
+            "los 2 clusteres positivos deben quedar en splits distintos; "
+            f"quedaron en {splits_con_positivos}"
+        )
+        # Y el invariante de no fuga se mantiene aunque la division sea invalida.
+        assert (df.groupby("cluster_id").split.nunique() == 1).all()
+
+    def test_one_dominant_cluster_still_gives_both_classes(self):
+        rows = [{"id": f"big_{j}", "cluster_id": 0, "label": 1} for j in range(600)]
+        for cid in range(1, 101):
+            rows.append({"id": f"s{cid}", "cluster_id": cid, "label": cid % 3 == 0})
+        df = pd.DataFrame(rows)
+
+        assignment = assign_splits(df, FRACTIONS, seed=42)
+        df["split"] = df.cluster_id.map(assignment)
+        for split in FRACTIONS:
+            sub = df[df.split == split]
+            assert len(sub) > 0 and sub.label.nunique() == 2, f"{split} degenerado"
+
+    def test_seeding_does_not_break_no_leakage(self):
+        """La siembra no puede romper el invariante que todo esto protege."""
+        df = make_df([200, 150, 80] + [20] * 30 + [1] * 200)
+        assignment = assign_splits(df, FRACTIONS, seed=42)
+        df["split"] = df.cluster_id.map(assignment)
+        assert (df.groupby("cluster_id").split.nunique() == 1).all()
+
+
+@pytest.mark.skipif(importlib.util.find_spec("Bio") is None, reason="Biopython no instalado")
+class TestIdentityAudit:
+    """P-04: la verificacion directa de la premisa del proyecto."""
+
+    def test_detects_planted_leakage(self):
+        """Si se mete a mano un pariente identico en train, debe aparecer."""
+        seq = "GIGKFLHSAKKFGKAFVGEIMNS"
+        df = pd.DataFrame(
+            [
+                {"id": "tr1", "sequence": seq, "split": "train", "label": 1, "cluster_id": 0},
+                {"id": "te1", "sequence": seq, "split": "test", "label": 1, "cluster_id": 1},
+            ]
+        )
+        audit = audit_train_test_identity(df, threshold=0.4)
+        assert audit["n_over_threshold"] == 1
+        assert audit["fraction_over_threshold"] == 1.0
+        assert audit["max_identity_distribution"]["max"] == 1.0
+
+    def test_clean_split_reports_no_leakage(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "id": "tr1",
+                    "sequence": "KKKKRRRRKKKKRRRR",
+                    "split": "train",
+                    "label": 1,
+                    "cluster_id": 0,
+                },
+                {
+                    "id": "te1",
+                    "sequence": "DDDDEEEEDDDDEEEE",
+                    "split": "test",
+                    "label": 0,
+                    "cluster_id": 1,
+                },
+            ]
+        )
+        audit = audit_train_test_identity(df, threshold=0.4)
+        assert audit["n_over_threshold"] == 0
+
+    def test_empty_split_returns_error_not_crash(self):
+        df = pd.DataFrame(
+            [{"id": "tr1", "sequence": "GIGKFL", "split": "train", "label": 1, "cluster_id": 0}]
+        )
+        assert "error" in audit_train_test_identity(df, threshold=0.4)

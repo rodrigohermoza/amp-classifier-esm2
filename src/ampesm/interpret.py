@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-from .config import FIGURES_DIR, METRICS_DIR, ensure_dirs, load_params
+from .config import FIGURES_DIR, METRICS_DIR, MODELS_DIR, ensure_dirs, load_params
 from .evaluate import _setup_matplotlib, choose_threshold
 from .features import physchem
 from .models import PREDICTIONS_DIR, load_splits
@@ -134,11 +134,31 @@ def error_analysis(df: pd.DataFrame, tag: str) -> dict:
     test = preds[preds.split == "test"].merge(
         df[["id", "sequence", "source", "length"]], on="id", how="left"
     )
+    # P-10a: si hay predicciones de una corrida anterior, el cruce deja
+    # sequence=NaN para los ids que ya no existen y physchem_matrix revienta con
+    # un TypeError opaco ("'float' object is not iterable"). Pasa al re-correr
+    # 'make data' o cambiar negative_ratio sin borrar las predicciones.
+    if test.sequence.isna().any():
+        n = int(test.sequence.isna().sum())
+        raise RuntimeError(
+            f"{n} predicciones de {tag} corresponden a ids que ya no estan en "
+            f"splits.csv: son de una corrida anterior. Corre 'make clean' y "
+            f"reentrena ('make baselines' y 'make train')."
+        )
     test["pred"] = (test.score >= threshold).astype(int)
     test["correct"] = test.pred == test.label
 
     # Descriptores fisicoquimicos de cada peptido de prueba.
-    desc = physchem.physchem_matrix(test.sequence.tolist())
+    # P-10f: con los valores por defecto, si alguien cambia el pH o la ventana
+    # en params.yaml el analisis de errores describiria los peptidos con
+    # descriptores distintos de los que vio el modelo, sin ningun aviso.
+    fcfg = load_params().features
+    desc = physchem.physchem_matrix(
+        test.sequence.tolist(),
+        ph=float(fcfg.get("physchem_ph", 7.4)),
+        window=int(fcfg.get("moment_window", 11)),
+        angle=float(fcfg.get("moment_angle_deg", 100.0)),
+    )
     for i, name in enumerate(physchem.FEATURE_NAMES):
         test[name] = desc[:, i]
 
@@ -174,7 +194,11 @@ def error_analysis(df: pd.DataFrame, tag: str) -> dict:
         by_source[source] = entry
 
     # Pregunta 4: ¿el error depende de la longitud?
-    bins = [4, 10, 20, 30, 40, 51]
+    # P-10g: derivado de params.yaml. Con el borde cableado en 51, subir
+    # max_length dejaria los peptidos mas largos en NaN y groupby(observed=True)
+    # los descartaria del reporte en silencio.
+    max_len = int(load_params().data.get("max_length", 50))
+    bins = [4, 10, 20, 30, 40, max(51, max_len + 1)]
     test["length_bin"] = pd.cut(test.length, bins=bins, right=False)
     by_length = {
         str(interval): {"n": int(len(sub)), "accuracy": round(float(sub.correct.mean()), 4)}
@@ -252,6 +276,36 @@ def error_analysis(df: pd.DataFrame, tag: str) -> dict:
     return report
 
 
+def _best_model_by_validation() -> str:
+    """Modelo a interpretar, elegido por VALIDACION.
+
+    P-05: antes se tomaba el primero de summary.csv, que esta ordenado por MCC
+    de test. Interpretar el ganador en test no infla una metrica (el analisis de
+    errores es descriptivo), pero sesga la narrativa: se acaba contando la
+    historia del modelo que mejor le fue al conjunto de prueba. Los ROC-AUC de
+    validacion ya estan guardados por save_result en results/models/*.json.
+    """
+    metas = sorted(MODELS_DIR.glob("*.json"))
+    if metas:
+        best, best_auc = None, -1.0
+        for path in metas:
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            auc = float(meta.get("val_roc_auc", -1.0))
+            if auc > best_auc and (PREDICTIONS_DIR / f"{path.stem}.csv").exists():
+                best, best_auc = path.stem, auc
+        if best:
+            print(f"[interpret] modelo elegido por val ROC-AUC {best_auc:.4f}")
+            return best
+
+    available = sorted(p.stem for p in PREDICTIONS_DIR.glob("*.csv"))
+    if not available:
+        raise FileNotFoundError("No hay predicciones; corre 'make baselines' y 'make train'")
+    return available[0]
+
+
 def interpret_all(tag: str | None = None) -> None:
     """Corre todas las figuras de interpretacion."""
     ensure_dirs()
@@ -263,16 +317,7 @@ def interpret_all(tag: str | None = None) -> None:
 
     # Si no se indica modelo, se usa el de mejor MCC segun el resumen.
     if tag is None:
-        summary_path = METRICS_DIR / "summary.csv"
-        if summary_path.exists():
-            tag = pd.read_csv(summary_path).sort_values("mcc", ascending=False).iloc[0].tag
-        else:
-            available = sorted(p.stem for p in PREDICTIONS_DIR.glob("*.csv"))
-            if not available:
-                raise FileNotFoundError(
-                    "No hay predicciones; corre 'make baselines' y 'make train'"
-                )
-            tag = available[0]
+        tag = _best_model_by_validation()
 
     print(f"[interpret] modelo elegido: {tag}")
     error_analysis(df, tag)

@@ -315,7 +315,7 @@ def interpret_all(tag: str | None = None) -> None:
     plot_length_distribution(df)
     print("[interpret] distribucion de longitudes")
 
-    # Si no se indica modelo, se usa el de mejor MCC segun el resumen.
+    # Si no se indica modelo, se usa el de mejor ROC-AUC en VALIDACION (P-05).
     if tag is None:
         tag = _best_model_by_validation()
 

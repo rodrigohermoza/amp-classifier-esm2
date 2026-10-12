@@ -233,7 +233,25 @@ def paired_difference(
             diffs.append(value(rng.integers(0, len(merged), size=len(merged))))
 
     arr = np.asarray(diffs, dtype=float)
+    n_requested = len(arr)
     arr = arr[~np.isnan(arr)]
+
+    # P-16: el arreglo de P-07 se aplico a bootstrap_metrics pero no aqui, y
+    # esta es LA inferencia del proyecto. Sin la guarda, np.quantile sobre un
+    # array vacio lanza IndexError; y sin la contabilidad, el intervalo podria
+    # estar condicionado a una fraccion arbitraria de remuestreos sin dejar
+    # rastro, que es justo lo que P-07 decia haber resuelto.
+    if len(arr) == 0:
+        raise ValueError(
+            "Todos los remuestreos del bootstrap fueron degenerados (una sola clase). "
+            "El conjunto de prueba es demasiado pequeno o esta muy desbalanceado."
+        )
+    if n_requested and len(arr) / n_requested < 0.99:
+        print(
+            f"[eval] AVISO: {n_requested - len(arr)} de {n_requested} remuestreos "
+            f"degenerados descartados en la comparacion; el IC esta condicionado"
+        )
+
     alpha = (1.0 - ci) / 2.0
     low = float(np.quantile(arr, alpha))
     high = float(np.quantile(arr, 1 - alpha))
@@ -243,6 +261,8 @@ def paired_difference(
         "difference": float(point),
         "ci_low": low,
         "ci_high": high,
+        "n_boot_valid": int(len(arr)),
+        "n_boot_requested": int(n_requested),
         "significant": bool(low > 0 or high < 0),
         "interpretation": (
             "La diferencia es distinguible de cero."
@@ -427,7 +447,11 @@ def _select_comparison_pair(
     Lo que nunca se usa es el resultado en test, que es lo que hacia la version
     anterior (P-05).
     """
-    tags = list(summary.tag)
+    # sorted() y no list(summary.tag): summary viene ordenado por MCC de TEST,
+    # y max() conserva el primer maximo, asi que un empate en validacion lo
+    # rompia el resultado en test (P-17). Con orden alfabetico el desempate es
+    # arbitrario pero independiente de test, que es lo que importa.
+    tags = sorted(summary.tag)
     emb_tags = [t for t in tags if t.startswith("facebook_")]
     base_tags = [t for t in tags if not t.startswith("facebook_")]
 
@@ -437,8 +461,12 @@ def _select_comparison_pair(
     if PREREGISTERED_EMBEDDING in emb_tags and PREREGISTERED_BASELINE in base_tags:
         return PREREGISTERED_EMBEDDING, PREREGISTERED_BASELINE, "preregistro (docs/07)"
 
-    best_emb = max(emb_tags, key=lambda t: val_scores.get(t, -1.0))
-    best_base = max(base_tags, key=lambda t: val_scores.get(t, -1.0))
+    print(
+        "[eval] AVISO: no estan las dos etiquetas preregistradas de docs/07; "
+        "se elige por ROC-AUC de validacion."
+    )
+    best_emb = max(emb_tags, key=lambda t: (val_scores.get(t, -1.0), t))
+    best_base = max(base_tags, key=lambda t: (val_scores.get(t, -1.0), t))
     return best_emb, best_base, "mejor ROC-AUC en validacion"
 
 

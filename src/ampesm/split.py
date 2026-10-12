@@ -316,14 +316,18 @@ def cluster_builtin(
         assigned: int | None = None
 
         for rep_idx, n_shared in candidates:
-            # n_shared / n_kmers es una cota SUPERIOR de la contencion, porque
-            # el denominador real es min(n_kmers, len(rep_kmers)) <= n_kmers.
-            # Como los candidatos vienen ordenados por n_shared descendente, en
-            # cuanto la cota baja del umbral ningun candidato posterior puede
-            # pasarlo: se corta el bucle en vez de seguir recorriendo cientos
-            # de candidatos sin esperanza (el perfilado de P-11 mostro que el
-            # coste esta aqui y no en los alineamientos).
-            if n_kmers == 0 or (n_shared / n_kmers) < prefilter:
+            # Corte temprano. OJO con la direccion de la cota (P-14):
+            # contencion = n_shared / min(n_kmers, n_kmers_rep). Si el
+            # representante tiene MENOS k-meros que la consulta, el denominador
+            # real es menor y la contencion real es MAYOR que n_shared/n_kmers,
+            # asi que esa cantidad es una cota INFERIOR, no superior, y cortar
+            # con ella descartaria pares validos.
+            #
+            # Aqui si es seguro cortar porque las secuencias se procesan de mas
+            # larga a mas corta, de modo que todo representante tiene al menos
+            # tantos k-meros como la consulta y la cota es exacta. La condicion
+            # se comprueba explicitamente en vez de confiar en el orden.
+            if len(rep_kmers[rep_idx]) >= n_kmers and (n_shared / max(n_kmers, 1)) < prefilter:
                 candidates_skipped += len(candidates) - candidates.index((rep_idx, n_shared))
                 break
 
@@ -491,8 +495,12 @@ def _max_identity_against(
         best_identity = 0.0
         best_partner: int | None = None
         for idx, n_shared in sorted(shared.items(), key=lambda kv: -kv[1]):
-            if n_kmers == 0 or (n_shared / n_kmers) < prefilter:
-                break
+            # Sin 'break' aqui, a diferencia de cluster_builtin (P-14). Las
+            # consultas son secuencias de test y los sujetos de train, en
+            # cualquier orden de longitud, asi que n_shared/n_kmers NO acota la
+            # contencion por arriba: un sujeto corto puede tener contencion 1.00
+            # con una cota de 0.12. Cortar el bucle perdia ademas todos los
+            # sujetos cortos restantes y falseaba la auditoria a la baja.
             denom = min(n_kmers, len(subject_kmers[idx]))
             if denom == 0 or (n_shared / denom) < prefilter:
                 continue
@@ -512,6 +520,7 @@ def audit_train_test_identity(
     max_test: int | None = None,
     seed: int = 42,
     null_model: bool = True,
+    null_replicates: int = 20,
 ) -> dict:
     """Identidad maxima de cada secuencia de test contra TODO train.
 
@@ -533,9 +542,13 @@ def audit_train_test_identity(
     clusteres, asi que no hay fuga", sino "el X% de las secuencias de test tiene
     un pariente por encima del umbral en train, y aqui esta la distribucion".
 
-    Se reutiliza el indice invertido de k-meros con un prefiltro laxo. Los pares
-    que el prefiltro descarta tienen identidad muy por debajo del umbral, asi
-    que el numero resultante es una cota inferior ajustada.
+    Se reutiliza el indice invertido de k-meros con un prefiltro laxo. **El
+    prefiltro no es inocuo**: medido contra fuerza bruta, cambia la identidad
+    maxima de una fraccion apreciable de las consultas y siempre a la baja, asi
+    que el resultado es una cota inferior, no una medida exacta. Se acepta
+    porque la fuerza bruta sobre miles de secuencias es inviable en Python, y
+    porque el nulo se calcula con el mismo prefiltro: el sesgo afecta por igual
+    a la medicion y a su control, que es lo que hace valida la comparacion.
     """
     aligner = _make_aligner()
     train = df[df.split == "train"]
@@ -544,11 +557,11 @@ def audit_train_test_identity(
     if train.empty or test.empty:
         return {"error": "train o test vacio; no se puede auditar"}
 
-    train_seqs = train.sequence.tolist()
-    train_kmers = [kmer_set(s, kmer_size) for s in train_seqs]
+    subject_seqs = train.sequence.tolist()
+    subject_kmers = [kmer_set(s, kmer_size) for s in subject_seqs]
 
     kmer_index: dict[str, set[int]] = defaultdict(set)
-    for idx, kms in enumerate(train_kmers):
+    for idx, kms in enumerate(subject_kmers):
         for km in kms:
             kmer_index[km].add(idx)
 
@@ -560,7 +573,7 @@ def audit_train_test_identity(
 
     test_seqs = test_rows.sequence.tolist()
     results = _max_identity_against(
-        test_seqs, train_seqs, train_kmers, kmer_index, aligner, kmer_size, prefilter
+        test_seqs, subject_seqs, subject_kmers, kmer_index, aligner, kmer_size, prefilter
     )
     arr = np.asarray([r[0] for r in results])
 
@@ -596,62 +609,118 @@ def audit_train_test_identity(
         "offenders": offenders,
     }
 
-    # --- Distribucion nula ------------------------------------------------
-    # Sin esto el numero de arriba es ININTERPRETABLE, y es un error que casi
-    # comete este proyecto (P-12). En peptidos cortos, con alineamiento global
-    # y huecos permitidos, dos secuencias SIN relacion alguna alinean a ~0.32
-    # de identidad de media. Es decir que el umbral del 40% esta dentro del
-    # ruido de fondo de la metrica, y un "29% de test por encima del umbral"
-    # puede no indicar ninguna fuga.
+    # --- Distribucion nula, por secuencia -------------------------------
+    # P-12 establecio que el numero crudo es ininterpretable sin control, pero
+    # el primer control elegido (la diferencia de proporciones agregadas) no
+    # tenia potencia (P-15): con el ruido de fondo, ambas proporciones estan
+    # saturadas cerca de 0.8, asi que plantar un 17% de parientes al 80% de
+    # identidad movia el exceso solo +0.017, indistinguible de cero.
     #
-    # El nulo se construye barajando los residuos de cada secuencia de test:
-    # conserva longitud y composicion exactas, que son lo que determina la
-    # identidad de fondo, y destruye cualquier parentesco real. La comparacion
-    # entre la distribucion real y la nula es la que de verdad informa.
+    # El control correcto es **por secuencia**: para cada peptido de test se
+    # baraja su propia secuencia R veces (conservando longitud y composicion
+    # exactas, que es lo que determina su identidad de fondo) y se mide la
+    # identidad maxima de cada baraja contra train. Eso da la distribucion nula
+    # DE ESA SECUENCIA, y su p-valor empirico es la fraccion de barajas que
+    # igualan o superan lo observado. Asi cada peptido se compara consigo mismo
+    # y no contra un promedio del conjunto.
     if null_model:
         rng = np.random.default_rng(seed)
-        shuffled = []
-        for s in test_seqs:
-            chars = list(s)
-            rng.shuffle(chars)
-            shuffled.append("".join(chars))
+        per_seq_null_max: list[list[float]] = [[] for _ in test_seqs]
 
-        null_results = _max_identity_against(
-            shuffled, train_seqs, train_kmers, kmer_index, aligner, kmer_size, prefilter
+        for _ in range(null_replicates):
+            shuffled = []
+            for s in test_seqs:
+                chars = list(s)
+                rng.shuffle(chars)
+                shuffled.append("".join(chars))
+            rep = _max_identity_against(
+                shuffled, subject_seqs, subject_kmers, kmer_index, aligner, kmer_size, prefilter
+            )
+            for i, (ident, _p) in enumerate(rep):
+                per_seq_null_max[i].append(ident)
+
+        null_all = np.asarray([v for lst in per_seq_null_max for v in lst])
+        m = len(arr)
+
+        # Como se mide la fuga (P-18). El primer intento fue un p-valor por
+        # secuencia con correccion de Benjamini-Hochberg, y era INCAPAZ de
+        # detectar nada: con R barajas el p-valor minimo posible es 1/(R+1), y
+        # tras corregir por m pruebas hace falta 1/(R+1) * m < 0.05, es decir
+        # R > 20*m. Con m=120 secuencias harian falta mas de 2 400 barajas por
+        # secuencia. El test daba cero por construccion, no por ausencia de
+        # fuga, que es la peor forma posible de equivocarse.
+        #
+        # Lo que si funciona: marcar una secuencia cuando su identidad observada
+        # supera TODAS sus propias barajas, y contrastar el NUMERO de marcadas
+        # contra lo que se espera por azar. Bajo la hipotesis nula, cada
+        # secuencia se marca con probabilidad 1/(R+1), asi que el conteo sigue
+        # una binomial y un test binomial da un p-valor global con potencia
+        # real. Se gana potencia agregando el conteo en vez de exigir
+        # significacion secuencia a secuencia.
+        flagged = np.array(
+            [arr[i] > max(per_seq_null_max[i], default=0.0) for i in range(len(arr))]
         )
-        null_arr = np.asarray([r[0] for r in null_results])
+        n_flagged = int(flagged.sum())
+        p_flag = 1.0 / (null_replicates + 1)
+        expected = m * p_flag
 
-        excess = float((arr >= threshold).mean() - (null_arr >= threshold).mean())
+        from scipy.stats import binomtest
+
+        global_p = float(binomtest(n_flagged, m, p_flag, alternative="greater").pvalue)
+        noise_cut = float(np.quantile(null_all, 0.99))
+
         report["null_model"] = {
             "description": (
-                "Mismas secuencias de test con sus residuos barajados: conserva "
-                "longitud y composicion, destruye el parentesco. Es el ruido de "
-                "fondo de la metrica de identidad."
+                "Por secuencia: cada peptido de test se baraja null_replicates veces "
+                "(conserva longitud y composicion, destruye el parentesco) y se mide "
+                "su identidad maxima contra train."
             ),
-            "mean": round(float(null_arr.mean()), 4),
-            "p90": round(float(np.quantile(null_arr, 0.90)), 4),
-            "p99": round(float(np.quantile(null_arr, 0.99)), 4),
-            "max": round(float(null_arr.max()), 4),
-            "fraction_over_threshold": round(float((null_arr >= threshold).mean()), 4),
+            "replicates": null_replicates,
+            "mean": round(float(null_all.mean()), 4),
+            "p90": round(float(np.quantile(null_all, 0.90)), 4),
+            "p99": round(noise_cut, 4),
+            "max": round(float(null_all.max()), 4),
+            "fraction_over_threshold": round(float((null_all >= threshold).mean()), 4),
         }
-        report["excess_over_null"] = round(excess, 4)
-        report["excess_over_null_note"] = (
-            "fraction_over_threshold real menos la del nulo. ESTE es el numero que "
-            "mide fuga por homologia; el crudo incluye el ruido de fondo de la "
-            "metrica. Un valor cercano a 0 significa que no hay fuga detectable, "
-            "aunque el crudo parezca alto. Ver docs/09, P-12."
-        )
-        # Umbral de fondo: el percentil 99 del nulo es un umbral de identidad
-        # por encima del cual un parecido ya no se explica por azar.
-        p99_null = float(np.quantile(null_arr, 0.99))
-        report["suggested_threshold_above_noise"] = round(p99_null, 4)
-        report["n_above_noise_threshold"] = int((arr > p99_null).sum())
+
+        # --- El numero que hay que leer -----------------------------------
+        report["leakage"] = {
+            "n_flagged": n_flagged,
+            "n_expected_by_chance": round(expected, 2),
+            "excess": round(n_flagged - expected, 2),
+            "fraction_flagged": round(float(n_flagged / m), 4) if m else 0.0,
+            "global_p_value": round(global_p, 6),
+            "significant": bool(global_p < 0.05),
+            "method": (
+                "Una secuencia se marca si su identidad maxima supera las "
+                f"{null_replicates} barajas de si misma. Bajo la nula eso ocurre con "
+                "probabilidad 1/(R+1); el conteo se contrasta con un test binomial."
+            ),
+            "note": (
+                "ESTE es el numero de fuga. n_flagged por si solo no significa nada: "
+                "se espera n_expected_by_chance por azar. Lo que importa es el exceso "
+                "y su p-valor global. Verificado contra fuga plantada; ver docs/09, P-18."
+            ),
+        }
+        report["n_above_noise_threshold"] = int((arr > noise_cut).sum())
+        report["suggested_threshold_above_noise"] = round(noise_cut, 4)
+        report["flagged_ids"] = [test_rows.iloc[i].id for i in range(len(arr)) if flagged[i]][:50]
+
+        # Se conserva el agregado por transparencia, marcado como lo que es.
+        report["excess_over_null_deprecated"] = {
+            "value": round(float((arr >= threshold).mean() - (null_all >= threshold).mean()), 4),
+            "warning": (
+                "NO usar como medida de fuga: es la diferencia de dos proporciones "
+                "saturadas y no detecta fuga plantada ni al 80% de identidad. Se "
+                "conserva solo para poder comparar con corridas antiguas. Ver P-15."
+            ),
+        }
 
     report["note"] = (
-        "Identidad maxima de cada secuencia de test contra todo train. Lee "
-        "excess_over_null, no fraction_over_threshold a secas: la metrica de "
-        "identidad tiene un ruido de fondo alto en peptidos cortos. "
-        "Ver docs/09, P-04 y P-12."
+        "Identidad maxima de cada secuencia de test contra todo train. El numero "
+        "de fuga es leakage.global_p_value y su exceso, NO fraction_over_threshold: "
+        "la metrica de identidad tiene un ruido de fondo alto en peptidos cortos. "
+        "Ver docs/09, P-04, P-12, P-15 y P-18."
     )
     return report
 
@@ -892,23 +961,26 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
         )
         if "null_model" in audit:
             null = audit["null_model"]
+            leak = audit["leakage"]
             print(
-                f"[split]   ruido de fondo (secuencias barajadas): "
-                f"{null['fraction_over_threshold']:.1%}, media {null['mean']:.3f}"
+                f"[split]   ruido de fondo ({null['replicates']} barajas por secuencia): "
+                f"media {null['mean']:.3f}, p99 {null['p99']:.3f}"
             )
             print(
-                f"[split]   FUGA REAL (exceso sobre el nulo): " f"{audit['excess_over_null']:+.1%}"
+                f"[split]   marcadas: {leak['n_flagged']} de {audit['n_test_audited']} "
+                f"(esperadas por azar {leak['n_expected_by_chance']}), "
+                f"exceso {leak['excess']:+.1f}"
             )
-            noise_cut = audit["suggested_threshold_above_noise"]
             print(
-                f"[split]   por encima del ruido (identidad > {noise_cut:.2f}): "
-                f"{audit['n_above_noise_threshold']} de {audit['n_test_audited']}"
+                f"[split]   FUGA: p global = {leak['global_p_value']:.4g} "
+                f"({'SIGNIFICATIVA' if leak['significant'] else 'no significativa'})"
             )
-            if audit["excess_over_null"] > 0.02:
+            if leak["significant"]:
                 print(
-                    "[split] AVISO: hay fuga por homologia por encima del ruido de fondo. "
-                    "Revisa el metodo de clustering antes de publicar."
+                    "[split] AVISO: hay fuga por homologia estadisticamente "
+                    "significativa. Revisa el metodo de clustering antes de publicar."
                 )
+
     if not report["publishable"]:
         print("[split] AVISO: publishable=false (se uso el respaldo propio). Ver docs/09, P-03.")
 

@@ -301,7 +301,7 @@ def interfacial_hydrophobicity(sequence: str) -> float:
 
 
 def physchem_vector(sequence: str, ph: float = 7.4, window: int = 11, angle: float = 100.0):
-    """Los 10 descriptores en el orden de FEATURE_NAMES."""
+    """Los 11 descriptores en el orden de FEATURE_NAMES."""
     charge = net_charge(sequence, ph)
     length = len(sequence)
     return np.array(

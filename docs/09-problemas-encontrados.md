@@ -473,6 +473,165 @@ mucho mas de lo que deberia, porque uno empieza buscando en el sitio
 equivocado. Que los tests no dependan del estado de la instalacion es barato y
 evita exactamente esa confusion a quien clone el repositorio.
 
+---
+
+## P-14 — El corte temprano de la auditoria usaba una cota invertida
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO · **Introducido por el arreglo de P-03**
+
+**Sintoma:** ninguno. La auditoria devolvia numeros plausibles que eran
+aproximadamente la mitad de los correctos.
+
+**Causa:** el corte temprano por k-meros usaba `n_shared / n_kmers_consulta` y
+el comentario lo llamaba "cota superior" de la contencion. Es al reves. La
+contencion es `n_shared / min(n_kmers_consulta, n_kmers_sujeto)`; si el sujeto
+tiene **menos** k-meros, el denominador real es menor y la contencion real es
+**mayor**, de modo que esa cantidad es una cota **inferior**.
+
+Caso medido: consulta de 50 residuos (48 k-meros) y sujeto de 8 residuos que es
+un fragmento exacto suyo (6 k-meros, los 6 compartidos).
+
+| | valor |
+|---|---|
+| cota usada | 6/48 = **0.125** |
+| contencion real | 6/6 = **1.000** |
+| identidad real | **1.00** |
+
+Con prefiltro 0.05 la cota no llegaba al umbral, se ejecutaba `break` y se
+descartaba ese sujeto **y todos los siguientes**. Es exactamente el caso
+corto-dentro-de-largo que P-03 habia arreglado, reintroducido dentro de la
+herramienta que debia auditarlo.
+
+En `cluster_builtin` el mismo codigo es inofensivo porque las secuencias se
+procesan de mas larga a mas corta y el representante siempre tiene al menos
+tantos k-meros que la consulta, con lo que la cota es exacta. En la auditoria
+no hay ningun orden: las consultas son de test y los sujetos de train.
+
+**Impacto medido antes del arreglo:** cambiaba la identidad maxima en el 41% de
+las consultas, siempre a la baja, y la fraccion por encima del umbral pasaba de
+0.80 a 0.37.
+
+**Resuelto asi:** `break` por `continue` en `_max_identity_against`. En
+`cluster_builtin` se conserva el corte, pero condicionado explicitamente a
+`len(rep_kmers[rep_idx]) >= n_kmers` en vez de confiar en el orden, y con el
+comentario corregido. Test de regresion `test_short_subject_is_not_skipped`.
+
+**Leccion:** el comentario equivocado era lo que hacia que el codigo pareciera
+correcto. Una cota mal razonada y bien explicada es peor que una sin comentar,
+porque desactiva la revision. Y el patron de fondo se repite: **el arreglo de
+un problema reintrodujo ese mismo problema en otro sitio**, porque se copio la
+idea sin volver a comprobar sus condiciones.
+
+---
+
+## P-15 — El primer control de la auditoria no tenia potencia
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO · **Introducido por el arreglo de P-12**
+
+**Causa:** P-12 establecio, con razon, que el numero crudo necesita un control.
+El control elegido fue `excess_over_null`: la fraccion de test por encima del
+umbral menos la misma fraccion en secuencias barajadas. El problema es que son
+**dos proporciones saturadas**: con el ruido de fondo, ambas rondan 0.80, asi
+que anadir parientes reales apenas puede moverlas. Hay techo.
+
+Medido plantando 20 parientes en 120 secuencias de test (16,7% de fuga real,
+que deberia dar ~+0.167):
+
+| escenario | `excess_over_null` | ¿detecta? |
+|---|---|---|
+| sin fuga | −0.030 | — |
+| 20/120 al 60% de identidad | +0.025 | **no** |
+| 20/120 al 80% de identidad | +0.017 | **no** |
+
+Y una sola baraja hacia el estadistico tan ruidoso (sd 0.037 sobre datos sin
+fuga) que el aviso configurado en 0.02 se disparaba con ruido puro la mitad de
+las veces.
+
+**Resuelto asi:** ver P-18. El agregado se conserva en el reporte como
+`excess_over_null_deprecated`, con su advertencia, para poder comparar con
+corridas antiguas.
+
+**Leccion:** tener un control no basta; el control tiene que **poder** detectar
+el efecto que busca. Es la diferencia entre hacer el gesto de la rigurosidad y
+ser riguroso. Un test que no puede fallar no es evidencia de nada.
+
+---
+
+## P-16 — `paired_difference` reventaba con remuestreos degenerados
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+**Causa:** el arreglo de P-07 se aplico a `bootstrap_metrics` pero no a
+`paired_difference`, que es **la unica inferencia del proyecto**. Con
+remuestreos degenerados, `arr` podia quedar vacio y `np.quantile` lanzaba
+`IndexError: index -1 is out of bounds`. Peor que el fallo: no registraba
+`n_boot_valid`, asi que el intervalo podia estar condicionado a una fraccion
+arbitraria de remuestreos sin dejar rastro, que es justo lo que P-07 decia
+haber resuelto.
+
+**Resuelto asi:** misma guarda y misma contabilidad que en `bootstrap_metrics`,
+mas error explicito si no sobrevive ningun remuestreo.
+
+**Leccion:** al arreglar un problema, buscar todos los sitios donde vive el
+mismo patron. Un `grep` del sintoma habria encontrado este en diez segundos.
+
+---
+
+## P-17 — Los empates en validacion se rompian por el resultado en test
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+**Causa:** `_select_comparison_pair` construia las listas de candidatos desde
+`list(summary.tag)`, y `summary` viene ordenado por MCC **de test**. Como
+`max()` conserva el primer maximo, un empate en ROC-AUC de validacion lo
+desempataba el orden de test. Con un conjunto de validacion pequeno los empates
+son plausibles.
+
+**Resuelto asi:** `sorted(summary.tag)` y desempate por `(val_score, tag)`. El
+desempate alfabetico es arbitrario, que es precisamente lo que se quiere:
+arbitrario pero independiente de test. Ademas se imprime un aviso cuando no
+estan las etiquetas preregistradas y se cae al criterio de validacion, porque
+antes esa degradacion era silenciosa.
+
+---
+
+## P-18 — El segundo control tampoco detectaba nada, y por construccion
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+Tercer intento de medir la fuga, y el unico que funciona. Se documenta entero
+porque la secuencia de los tres errores es mas instructiva que el resultado.
+
+**Causa:** el reemplazo de P-15 fue un p-valor empirico por secuencia con
+correccion de Benjamini-Hochberg. Daba **cero fugas detectadas en todos los
+escenarios, incluido uno con parientes al 80% de identidad**.
+
+El motivo no era estadistico sino aritmetico: con R barajas, el p-valor minimo
+posible es `1/(R+1)`. Para que sobreviva a BH sobre m pruebas hace falta
+`1/(R+1) * m < 0.05`, es decir `R > 20m`. Con 120 secuencias de test harian
+falta **mas de 2 400 barajas por secuencia**. Con R=20 el test daba cero
+**por construccion**, no por ausencia de fuga.
+
+**Resuelto asi:** en vez de exigir significacion secuencia a secuencia, se
+marca una secuencia cuando su identidad observada supera **todas** sus propias
+barajas, y se contrasta el **numero** de marcadas contra lo esperado por azar.
+Bajo la nula cada secuencia se marca con probabilidad `1/(R+1)`, asi que el
+conteo sigue una binomial y un test binomial da un p-valor global. Agregar el
+conteo recupera la potencia que se perdia al exigir significacion individual.
+
+Validado contra fuga plantada (20 de 120, R=20):
+
+| escenario | marcadas | esperadas | p global | ¿detecta? |
+|---|---|---|---|---|
+| sin fuga | 6 | 5,7 | 0,51 | no (correcto) |
+| 20/120 al 50% | 15 | 5,7 | 0,0006 | **si** |
+| 20/120 al 60% | 27 | 5,7 | <1e-6 | **si** |
+| 20/120 al 80% | 25 | 5,7 | <1e-6 | **si** |
+
+Detecta desde el 50% de identidad, donde el estadistico de P-15 no veia nada ni
+al 80%. Test de regresion `TestLeakageDetector`.
+
+**Leccion, y es la de toda la sesion:** hicieron falta **tres** intentos para
+medir una sola cosa, y los tres primeros fallaban en silencio devolviendo
+numeros plausibles. Lo que rompio la racha no fue pensar mejor, fue **plantar
+fuga conocida y exigir que el detector la encontrara**. Un diagnostico que
+nunca se ha probado contra un caso positivo conocido no es un diagnostico.
+
 ## Plantilla para entradas nuevas
 
 ```

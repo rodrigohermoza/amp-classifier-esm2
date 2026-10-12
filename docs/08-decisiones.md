@@ -236,3 +236,23 @@ GRAVY de magainina-2 contra ExPASy, momento ~0 en homopolimeros.
 **Coste:** hay que buscar un valor de referencia por descriptor, que no siempre
 es rapido. Vale la pena: un descriptor con la escala equivocada no falla, solo
 empeora el modelo en silencio y envenena la interpretacion.
+
+---
+
+## D-15 — Todo diagnostico se valida contra un caso positivo conocido
+**Fecha:** 2026-10-11
+
+Hicieron falta tres intentos para construir un detector de fuga que detectara
+fuga (P-12, P-15, P-18). Los tres primeros devolvian numeros plausibles y no
+encontraban nada, incluso con parientes al 80% de identidad plantados a mano.
+Ninguno fallaba de forma visible.
+
+**Decision:** ningun diagnostico se da por bueno hasta que se le planta el
+efecto que busca y lo encuentra. En el repositorio eso vive como test:
+`TestLeakageDetector` planta fuga a varios niveles de identidad y exige
+deteccion, ademas de exigir que no haya falsos positivos sin fuga.
+
+**Por que es una decision y no solo un test:** generaliza. Si mas adelante se
+anade un detector de desbalance, de sesgo por fuente o de deriva de
+distribucion, tiene que venir con su caso positivo. Un control que no puede
+fallar no es evidencia.

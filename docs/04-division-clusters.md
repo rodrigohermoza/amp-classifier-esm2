@@ -151,30 +151,51 @@ entrenamiento**. El resultado va a `split_report.json` con su histograma.
 
 La primera corrida de esta auditoria dijo que el 29% de las secuencias de test
 tenian identidad >= 0.4 contra train, lo que leido tal cual significaria que
-todo el metodo no sirve. Es falso, y la razon es importante: **la identidad de
-secuencia tiene un ruido de fondo alto en peptidos cortos**. Con alineamiento
-global y huecos permitidos, dos peptidos sin ninguna relacion alinean al 0.33
-de media, y uno de cada tres supera el 0.4 por azar.
+todo el metodo no sirve. Es falso: **la identidad de secuencia tiene un ruido
+de fondo alto en peptidos cortos**. Con alineamiento global y huecos
+permitidos, dos peptidos sin ninguna relacion alinean al 0.33 de media.
 
-Por eso la auditoria baraja los residuos de cada secuencia de test, lo que
-conserva longitud y composicion y destruye el parentesco, y repite la medicion.
-Lo que se reporta como fuga es el **exceso sobre ese nulo**:
+El control es **por secuencia**: cada peptido de test se baraja 20 veces, lo
+que conserva su longitud y su composicion exactas (que es lo que determina su
+identidad de fondo) y destruye cualquier parentesco, y se mide la identidad
+maxima de cada baraja contra train. Una secuencia se **marca** cuando su
+identidad observada supera todas sus propias barajas.
 
+Bajo la hipotesis de que no hay fuga, cada secuencia se marca con probabilidad
+1/(R+1), asi que el numero de marcadas sigue una binomial y un test binomial da
+un p-valor global. Lo que se reporta como fuga es ese p-valor y el exceso de
+marcadas sobre lo esperado por azar:
+
+```json
+"leakage": {
+  "n_flagged": 6,
+  "n_expected_by_chance": 5.7,
+  "excess": 0.3,
+  "global_p_value": 0.51,
+  "significant": false
+}
 ```
-fraction_over_threshold            29.3%   <- crudo, no significa nada solo
-null_model.fraction_over_threshold 30.4%   <- ruido de fondo
-excess_over_null                   -1.1%   <- ESTO es la fuga
-```
 
-Detalle en [09-problemas-encontrados.md](09-problemas-encontrados.md), P-12.
+Validado plantando fuga conocida: detecta 20 parientes de 120 desde el 50% de
+identidad. Costo tres intentos llegar a un estadistico que funcionara, y los
+dos primeros devolvian numeros plausibles sin detectar nada; la historia
+completa esta en [09-problemas-encontrados.md](09-problemas-encontrados.md),
+P-12, P-15 y P-18. La leccion que dejo: **un diagnostico que nunca se ha
+probado contra un caso positivo conocido no es un diagnostico.**
 
-## Lo que se guarda
+### Honestidad sobre el respaldo en Python
 
-`data/processed/splits.csv` con `cluster_id` y `split` por secuencia, y
-`data/processed/split_report.json` con: metodo usado, version de la herramienta,
-umbral, numero de clusteres, tamanos, porcentajes reales y balance de clases por
-split.
+Medido de extremo a extremo (pares que de verdad cumplen identidad >= 0.4 y
+cobertura >= 0.5 y acaban en el mismo cluster):
 
-El archivo de splits se versiona como artefacto. Asi, aunque MMseqs2 cambie de
-version y produzca clusteres distintos, los numeros publicados se pueden
-reproducir exactamente.
+| Identidad real | Recall del respaldo |
+|---|---|
+| 0.40 | 47% |
+| 0.45 | 53% |
+| 0.60 | 80% |
+| 0.80 | 85% |
+
+Es decir: **a 40-45% los pares se agrupan la mitad de las veces**. Unos 15
+puntos los pierde el prefiltro y el resto es la voracidad por representante,
+que es intrinseca al algoritmo. Por eso el respaldo marca `publishable: false`
+y MMseqs2 es obligatorio para numeros publicables (D-11).

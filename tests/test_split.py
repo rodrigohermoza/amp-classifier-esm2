@@ -6,6 +6,7 @@ homologia entre entrenamiento y prueba.
 """
 
 import importlib.util
+import random
 
 import numpy as np
 import pandas as pd
@@ -339,3 +340,86 @@ class TestIdentityAudit:
             [{"id": "tr1", "sequence": "GIGKFL", "split": "train", "label": 1, "cluster_id": 0}]
         )
         assert "error" in audit_train_test_identity(df, threshold=0.4)
+
+
+@pytest.mark.skipif(importlib.util.find_spec("Bio") is None, reason="Biopython no instalado")
+class TestLeakageDetector:
+    """P-14, P-15 y P-18: el detector de fuga debe DETECTAR FUGA.
+
+    Suena obvio y sin embargo las dos primeras versiones no lo hacian, cada una
+    por un motivo distinto, y ninguna fallaba de forma visible. Estos tests
+    plantan fuga a proposito y exigen que se vea.
+    """
+
+    AA = "ACDEFGHIKLMNPQRSTVWY"
+
+    def _frame(self, n_leak, identity, seed=11):
+        rng = random.Random(seed)
+        rows, train = [], []
+        for i in range(150):
+            s = "".join(rng.choices(self.AA, k=rng.randint(15, 45)))
+            train.append(s)
+            rows.append(
+                {"id": f"tr{i}", "sequence": s, "split": "train", "label": 1, "cluster_id": i}
+            )
+        for j in range(60):
+            if j < n_leak:
+                chars = list(train[j])
+                for k in range(len(chars)):
+                    if rng.random() > identity:
+                        chars[k] = rng.choice(self.AA)
+                s = "".join(chars)
+            else:
+                s = "".join(rng.choices(self.AA, k=rng.randint(15, 45)))
+            rows.append(
+                {"id": f"te{j}", "sequence": s, "split": "test", "label": 1, "cluster_id": 1000 + j}
+            )
+        return pd.DataFrame(rows)
+
+    def test_no_leakage_is_not_flagged(self):
+        audit = audit_train_test_identity(self._frame(0, 0.0), 0.4, null_replicates=20, seed=5)
+        assert not audit["leakage"]["significant"], f"falso positivo: {audit['leakage']}"
+
+    def test_planted_leakage_is_detected(self):
+        """Regresion de P-18.
+
+        El estadistico anterior (diferencia de proporciones agregadas) no
+        detectaba ni una fuga del 17% al 80% de identidad, porque comparaba dos
+        proporciones ya saturadas por el ruido de fondo.
+        """
+        audit = audit_train_test_identity(self._frame(12, 0.75), 0.4, null_replicates=20, seed=5)
+        leak = audit["leakage"]
+        assert leak["significant"], f"no detecto 12 de 60 parientes al 75%: {leak}"
+        assert leak["n_flagged"] > leak["n_expected_by_chance"]
+
+    def test_short_subject_is_not_skipped(self):
+        """Regresion de P-14: el corte temprano usaba una cota invertida.
+
+        Una consulta larga con un sujeto corto contenido entero daba identidad
+        1.00, pero la cota n_shared/n_kmers_consulta la dejaba por debajo del
+        prefiltro y el 'break' descartaba ese sujeto y todos los siguientes.
+        """
+        largo = "GIGKFLHSAKKFGKAFVGEIMNSKKWWRRPLFVACDEGHIKLMNPQRSTV"
+        df = pd.DataFrame(
+            [
+                {
+                    "id": "tr0",
+                    "sequence": "QQQQQQQQQQQQQQ",
+                    "split": "train",
+                    "label": 1,
+                    "cluster_id": 0,
+                },
+                {
+                    "id": "tr1",
+                    "sequence": largo[10:18],
+                    "split": "train",
+                    "label": 1,
+                    "cluster_id": 1,
+                },
+                {"id": "te0", "sequence": largo, "split": "test", "label": 1, "cluster_id": 2},
+            ]
+        )
+        audit = audit_train_test_identity(df, 0.4, null_model=False)
+        assert (
+            audit["max_identity_distribution"]["max"] == 1.0
+        ), "el fragmento exacto corto debe encontrarse"

@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from ampesm.split import (
+    _positive_rate_drift,
     assign_splits,
     audit_train_test_identity,
     cluster_builtin,
@@ -423,3 +424,87 @@ class TestLeakageDetector:
         assert (
             audit["max_identity_distribution"]["max"] == 1.0
         ), "el fragmento exacto corto debe encontrarse"
+
+
+class TestValAudit:
+    """P-27: la auditoria tiene que poder mirar val, no solo test.
+
+    val fija los hiperparametros y el umbral de decision, y ese umbral se
+    aplica a test. Homologia val-train sesga cinco de las siete metricas de
+    test sin que test tenga un solo pariente en train.
+    """
+
+    def _df(self):
+        seq = "GIGKFLHSAKKFGKAFVGEIMNS"
+        return pd.DataFrame(
+            [
+                {"id": "tr1", "sequence": seq, "split": "train", "label": 1, "cluster_id": 0},
+                # El pariente plantado esta en val, NO en test.
+                {"id": "va1", "sequence": seq, "split": "val", "label": 1, "cluster_id": 1},
+                {
+                    "id": "te1",
+                    "sequence": "DDDDEEEEDDDDEEEEDDDD",
+                    "split": "test",
+                    "label": 0,
+                    "cluster_id": 2,
+                },
+            ]
+        )
+
+    def test_finds_leakage_that_the_test_audit_cannot_see(self):
+        df = self._df()
+
+        on_test = audit_train_test_identity(df, threshold=0.4, null_model=False)
+        on_val = audit_train_test_identity(df, threshold=0.4, null_model=False, query_split="val")
+
+        assert on_test["n_over_threshold"] == 0, "test esta limpio, y el audit de test lo dice"
+        assert (
+            on_val["n_over_threshold"] == 1
+        ), "la fuga vive en val; si esto falla, la auditoria no mira donde hace falta"
+
+    def test_report_says_which_splits_it_compared(self):
+        audit = audit_train_test_identity(
+            self._df(), threshold=0.4, null_model=False, query_split="val"
+        )
+        assert audit["query_split"] == "val"
+        assert audit["reference_split"] == "train"
+
+    def test_missing_split_returns_error_not_crash(self):
+        audit = audit_train_test_identity(
+            self._df(), threshold=0.4, null_model=False, query_split="no_existe"
+        )
+        assert "error" in audit
+        assert audit["query_split"] == "no_existe"
+
+
+class TestPositiveRateDrift:
+    """P-26: hay un caso que pasa TODAS las demas validaciones con train al 6%
+    de positivos y test al 29%. PR-AUC, F1 y precision dependen de la
+    prevalencia, y el umbral elegido en val queda descalibrado para test."""
+
+    def _splits(self, rates):
+        return {k: {"n": 100, "positive_rate": r} for k, r in rates.items()}
+
+    def test_flags_the_known_bad_case(self):
+        drift = _positive_rate_drift(
+            self._splits({"train": 0.06, "val": 0.10, "test": 0.29}),
+            {"positive_rate_tolerance": 0.05},
+        )
+        assert drift["exceeds_tolerance"]
+        assert drift["argmin"] == "train"
+        assert drift["argmax"] == "test"
+        assert drift["spread"] == pytest.approx(0.23)
+
+    def test_accepts_a_balanced_split(self):
+        drift = _positive_rate_drift(
+            self._splits({"train": 0.57, "val": 0.56, "test": 0.58}),
+            {"positive_rate_tolerance": 0.05},
+        )
+        assert not drift["exceeds_tolerance"]
+
+    def test_ignores_empty_splits(self):
+        splits = self._splits({"train": 0.57, "test": 0.58})
+        splits["val"] = {"n": 0, "positive_rate": 0.0}
+        drift = _positive_rate_drift(splits, {"positive_rate_tolerance": 0.05})
+        assert "val" not in drift["rates"], "un split vacio tiene tasa 0.0 y falsearia la deriva"
+        assert not drift["exceeds_tolerance"]

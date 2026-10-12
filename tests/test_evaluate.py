@@ -1,10 +1,13 @@
 """Tests de metricas, umbral y bootstrap."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.metrics import roc_auc_score
 
+from ampesm.config import Params
 from ampesm.evaluate import (
     PREREGISTERED_BASELINE,
     PREREGISTERED_EMBEDDING,
@@ -262,3 +265,58 @@ class TestComparisonPairSelection:
         )
         assert emb is None and base is None
         assert "no aplicable" in basis
+
+
+class TestFeaturesHash:
+    """P-24: cambiar `features` y correr solo `interpret` no avisaba.
+
+    `error_analysis` recalcula los descriptores con la configuracion actual, asi
+    que con otra `moment_window` el analisis describe un modelo que no existe.
+    No fallaba nada: salia una figura plausible y equivocada.
+    """
+
+    def test_hash_changes_with_the_configuration(self):
+        a = Params(raw={"features": {"physchem_ph": 7.4, "moment_window": 11}})
+        b = Params(raw={"features": {"physchem_ph": 7.4, "moment_window": 18}})
+        assert a.features_hash() != b.features_hash()
+
+    def test_hash_does_not_depend_on_key_order(self):
+        a = Params(raw={"features": {"physchem_ph": 7.4, "moment_window": 11}})
+        b = Params(raw={"features": {"moment_window": 11, "physchem_ph": 7.4}})
+        assert a.features_hash() == b.features_hash()
+
+    def test_interpret_aborts_when_features_changed(self, tmp_path, monkeypatch):
+        import ampesm.interpret as interpret_mod
+
+        monkeypatch.setattr(interpret_mod, "MODELS_DIR", tmp_path)
+        (tmp_path / "modelo.json").write_text(
+            json.dumps({"tag": "modelo", "features_hash": "0000000000000000"})
+        )
+
+        with pytest.raises(ValueError, match="features"):
+            interpret_mod._check_features_hash(
+                "modelo", Params(raw={"features": {"moment_window": 11}})
+            )
+
+    def test_interpret_accepts_a_matching_hash(self, tmp_path, monkeypatch):
+        import ampesm.interpret as interpret_mod
+
+        params = Params(raw={"features": {"moment_window": 11}})
+        monkeypatch.setattr(interpret_mod, "MODELS_DIR", tmp_path)
+        (tmp_path / "modelo.json").write_text(
+            json.dumps({"tag": "modelo", "features_hash": params.features_hash()})
+        )
+
+        interpret_mod._check_features_hash("modelo", params)  # no debe lanzar
+
+    def test_old_model_without_hash_warns_but_does_not_abort(self, tmp_path, monkeypatch):
+        """Un modelo entrenado antes de este arreglo no tiene el campo. No se
+        puede comprobar, pero romper la etapa por eso seria peor."""
+        import ampesm.interpret as interpret_mod
+
+        monkeypatch.setattr(interpret_mod, "MODELS_DIR", tmp_path)
+        (tmp_path / "modelo.json").write_text(json.dumps({"tag": "modelo"}))
+
+        interpret_mod._check_features_hash(
+            "modelo", Params(raw={"features": {"moment_window": 11}})
+        )

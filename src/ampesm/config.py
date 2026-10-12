@@ -111,6 +111,24 @@ class Params:
     def interpret(self) -> dict[str, Any]:
         return self.section("interpret")
 
+    def features_hash(self) -> str:
+        """Huella de la seccion `features`, para detectar incoherencias.
+
+        Motivo (P-24): `interpret` recalcula los descriptores leyendo
+        `params.yaml`, asi que si se cambia `features.moment_window` y se corre
+        solo `interpret` sin reentrenar, los descriptores del analisis de
+        errores ya **no** son los que vio el modelo, y nada lo detecta. El hash
+        se guarda al entrenar y se compara al interpretar.
+
+        Se serializa con `sort_keys` para que el hash no dependa del orden en
+        que esten escritas las claves en el YAML.
+        """
+        import hashlib
+        import json as _json
+
+        payload = _json.dumps(self.features, sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
 
 def load_params(path: Path | None = None) -> Params:
     """Lee params.yaml. Si no existe, devuelve parametros vacios.

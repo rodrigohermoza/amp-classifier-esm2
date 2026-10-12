@@ -528,8 +528,10 @@ def audit_train_test_identity(
     seed: int = 42,
     null_model: bool = True,
     null_replicates: int = 20,
+    query_split: str = "test",
+    reference_split: str = "train",
 ) -> dict:
-    """Identidad maxima de cada secuencia de test contra TODO train.
+    """Identidad maxima de cada secuencia de `query_split` contra TODO `reference_split`.
 
     Esta es la verificacion que faltaba (P-04), y vale mas que cualquier ajuste
     de parametros del clustering.
@@ -556,15 +558,28 @@ def audit_train_test_identity(
     porque la fuerza bruta sobre miles de secuencias es inviable en Python, y
     porque el nulo se calcula con el mismo prefiltro: el sesgo afecta por igual
     a la medicion y a su control, que es lo que hace valida la comparacion.
+
+    `query_split` esta parametrizado porque **test no es el unico split que
+    importa**. `val` fija los hiperparametros y el umbral de decision, y ese
+    umbral se aplica despues a test, asi que entra en cinco de las siete
+    metricas (MCC incluida, que es la principal preregistrada). Homologia
+    val-train infla la seleccion y contamina las metricas de test **aunque test
+    este limpio**: la fuga no necesita tocar test para sesgar test.
     """
     aligner = _make_aligner()
-    train = df[df.split == "train"]
-    test = df[df.split == "test"]
+    reference = df[df.split == reference_split]
+    query = df[df.split == query_split]
 
-    if train.empty or test.empty:
-        return {"error": "train o test vacio; no se puede auditar"}
+    if reference.empty or query.empty:
+        return {
+            "error": (
+                f"{reference_split} o {query_split} vacio; no se puede auditar"
+            ),
+            "query_split": query_split,
+            "reference_split": reference_split,
+        }
 
-    subject_seqs = train.sequence.tolist()
+    subject_seqs = reference.sequence.tolist()
     subject_kmers = [kmer_set(s, kmer_size) for s in subject_seqs]
 
     kmer_index: dict[str, set[int]] = defaultdict(set)
@@ -572,32 +587,36 @@ def audit_train_test_identity(
         for km in kms:
             kmer_index[km].add(idx)
 
-    test_rows = test
+    query_rows = query
     sampled = False
-    if max_test is not None and len(test) > max_test:
-        test_rows = test.sample(n=max_test, random_state=seed)
+    if max_test is not None and len(query) > max_test:
+        query_rows = query.sample(n=max_test, random_state=seed)
         sampled = True
 
-    test_seqs = test_rows.sequence.tolist()
+    test_seqs = query_rows.sequence.tolist()
     results = _max_identity_against(
         test_seqs, subject_seqs, subject_kmers, kmer_index, aligner, kmer_size, prefilter
     )
     arr = np.asarray([r[0] for r in results])
 
     offenders = []
-    for row, (ident, partner) in zip(test_rows.itertuples(), results):
+    for row, (ident, partner) in zip(query_rows.itertuples(), results):
         if ident >= threshold and len(offenders) < 25:
             offenders.append(
                 {
                     "test_id": row.id,
                     "test_sequence": row.sequence,
                     "max_identity": round(ident, 4),
-                    "closest_train_id": train.iloc[partner].id if partner is not None else None,
+                    "closest_train_id": (
+                        reference.iloc[partner].id if partner is not None else None
+                    ),
                 }
             )
 
     report = {
         "threshold": threshold,
+        "query_split": query_split,
+        "reference_split": reference_split,
         "n_test_audited": int(len(arr)),
         "sampled": sampled,
         "n_over_threshold": int((arr >= threshold).sum()),
@@ -711,7 +730,9 @@ def audit_train_test_identity(
         }
         report["n_above_noise_threshold"] = int((arr > noise_cut).sum())
         report["suggested_threshold_above_noise"] = round(noise_cut, 4)
-        report["flagged_ids"] = [test_rows.iloc[i].id for i in range(len(arr)) if flagged[i]][:50]
+        report["flagged_ids"] = [
+            query_rows.iloc[i].id for i in range(len(arr)) if flagged[i]
+        ][:50]
 
         # Se conserva el agregado por transparencia, marcado como lo que es.
         report["excess_over_null_deprecated"] = {
@@ -724,10 +745,11 @@ def audit_train_test_identity(
         }
 
     report["note"] = (
-        "Identidad maxima de cada secuencia de test contra todo train. El numero "
-        "de fuga es leakage.global_p_value y su exceso, NO fraction_over_threshold: "
-        "la metrica de identidad tiene un ruido de fondo alto en peptidos cortos. "
-        "Ver docs/09, P-04, P-12, P-15 y P-18."
+        f"Identidad maxima de cada secuencia de {query_split} contra todo "
+        f"{reference_split}. El numero de fuga es leakage.global_p_value y su "
+        "exceso, NO fraction_over_threshold: la metrica de identidad tiene un "
+        "ruido de fondo alto en peptidos cortos. Ver docs/09, P-04, P-12, P-15 "
+        "y P-18."
     )
     return report
 
@@ -955,6 +977,9 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
         "parte del rendimiento puede venir de ahi. Ver docs/09, P-10."
     )
 
+    # P-26: la tasa de positivos no puede derivar entre splits.
+    report["positive_rate_drift"] = _positive_rate_drift(report["splits"], acfg)
+
     # P-04: la verificacion directa de la premisa del proyecto.
     print("[split] auditando identidad maxima test-vs-train...")
     max_test = acfg.get("max_test", 500)
@@ -968,6 +993,26 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
         null_replicates=int(acfg.get("null_replicates", 20)),
     )
 
+    # P-27: val fija los hiperparametros y el umbral, y ese umbral se aplica a
+    # test. Homologia val-train sesga las metricas de test sin tocar test.
+    if acfg.get("audit_val", True):
+        print("[split] auditando identidad maxima val-vs-train...")
+        # `max_val: null` en params significa "usa el mismo tope que test", no
+        # "audita val entero": lo segundo reintroduciria el coste cuadratico de
+        # P-19 por la puerta de atras.
+        max_val = acfg.get("max_val") if acfg.get("max_val") is not None else max_test
+        report["train_val_identity_audit"] = audit_train_test_identity(
+            df,
+            threshold=identity,
+            kmer_size=int(bcfg.get("kmer_size", 3)),
+            prefilter=float(bcfg.get("kmer_prefilter", 0.05)),
+            max_test=None if max_val is None else int(max_val),
+            seed=params.seed,
+            null_replicates=int(acfg.get("null_replicates", 20)),
+            query_split="val",
+            reference_split="train",
+        )
+
     SPLIT_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[split] {report['n_clusters']} clusteres ({report['cluster_size']['singletons']} de 1)")
@@ -979,10 +1024,13 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             f"tasa positiva {info['positive_rate']:.3f}"
         )
 
-    audit = report["train_test_identity_audit"]
-    if "error" not in audit:
+    for key in ("train_test_identity_audit", "train_val_identity_audit"):
+        audit = report.get(key)
+        if audit is None or "error" in audit:
+            continue
+        label = f"{audit['query_split']}-vs-{audit['reference_split']}"
         print(
-            f"[split] identidad test-vs-train: {audit['fraction_over_threshold']:.1%} "
+            f"[split] identidad {label}: {audit['fraction_over_threshold']:.1%} "
             f"por encima de {identity} (crudo)"
         )
         if "null_model" in audit:
@@ -1002,10 +1050,24 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
                 f"({'SIGNIFICATIVA' if leak['significant'] else 'no significativa'})"
             )
             if leak["significant"]:
-                print(
-                    "[split] AVISO: hay fuga por homologia estadisticamente "
-                    "significativa. Revisa el metodo de clustering antes de publicar."
+                extra = (
+                    " val fija el umbral que se aplica a test, asi que esto sesga "
+                    "las metricas de test aunque test este limpio."
+                    if audit["query_split"] == "val"
+                    else " Revisa el metodo de clustering antes de publicar."
                 )
+                print(
+                    f"[split] AVISO: fuga por homologia significativa en {label}.{extra}"
+                )
+
+    drift = report["positive_rate_drift"]
+    print(
+        f"[split] deriva de tasa positiva: {drift['spread']:.3f} "
+        f"(min {drift['min']:.3f} en {drift['argmin']}, "
+        f"max {drift['max']:.3f} en {drift['argmax']})"
+    )
+    if drift["exceeds_tolerance"]:
+        print(f"[split] AVISO: {drift['note']}")
 
     if not report["publishable"]:
         print("[split] AVISO: publishable=false (se uso el respaldo propio). Ver docs/09, P-03.")
@@ -1021,3 +1083,54 @@ def _length_ks_pvalue(pos: pd.DataFrame, neg: pd.DataFrame) -> float | None:
     from scipy.stats import ks_2samp
 
     return round(float(ks_2samp(pos.length.to_numpy(), neg.length.to_numpy()).pvalue), 6)
+
+
+def _positive_rate_drift(splits_report: dict, audit_cfg) -> dict:
+    """Comprueba que la tasa de positivos no derive entre splits.
+
+    Por que importa (P-26): PR-AUC, F1 y precision dependen de la prevalencia,
+    asi que con tasas distintas las metricas de los tres splits no son
+    comparables entre si. Peor: el umbral se elige maximizando MCC en `val` y
+    se aplica a `test`, y un umbral calibrado al 6% de positivos aplicado a un
+    conjunto al 29% esta simplemente mal calibrado. Hay un caso conocido que
+    pasa TODAS las demas validaciones con exactamente esas dos tasas.
+
+    No aborta, avisa. A diferencia de un split degenerado (que no tiene
+    arreglo), una deriva moderada sigue siendo utilizable si se reporta: lo que
+    no se puede es no saberlo. La tolerancia sale de `split.audit.
+    positive_rate_tolerance`.
+    """
+    rates = {k: v["positive_rate"] for k, v in splits_report.items() if v["n"] > 0}
+    tolerance = float(audit_cfg.get("positive_rate_tolerance", 0.05))
+
+    if len(rates) < 2:
+        return {
+            "rates": rates,
+            "tolerance": tolerance,
+            "error": "hacen falta al menos dos splits no vacios",
+        }
+
+    argmin = min(rates, key=lambda k: rates[k])
+    argmax = max(rates, key=lambda k: rates[k])
+    spread = rates[argmax] - rates[argmin]
+    exceeds = spread > tolerance
+
+    return {
+        "rates": rates,
+        "min": rates[argmin],
+        "argmin": argmin,
+        "max": rates[argmax],
+        "argmax": argmax,
+        "spread": round(spread, 4),
+        "tolerance": tolerance,
+        "exceeds_tolerance": bool(exceeds),
+        "note": (
+            f"la tasa de positivos varia {spread:.3f} entre splits "
+            f"({argmin} {rates[argmin]:.3f} vs {argmax} {rates[argmax]:.3f}), "
+            f"por encima de la tolerancia {tolerance}. PR-AUC, F1 y precision no "
+            "son comparables entre splits, y el umbral elegido en val esta "
+            "descalibrado para test. Ver docs/09, P-26."
+            if exceeds
+            else "dentro de tolerancia"
+        ),
+    }

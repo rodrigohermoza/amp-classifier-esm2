@@ -367,6 +367,9 @@ def save_result(result: TrainResult) -> Path:
         "best_params": {k: (None if v is None else v) for k, v in result.best_params.items()},
         "val_roc_auc": result.val_roc_auc,
         "val_mcc_at_0.5": result.val_mcc,
+        # P-24: con que configuracion de `features` se entreno este modelo.
+        # `interpret` lo compara con la actual antes de interpretar nada.
+        "features_hash": load_params().features_hash(),
     }
     (MODELS_DIR / f"{result.tag}.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False, default=str), encoding="utf-8"

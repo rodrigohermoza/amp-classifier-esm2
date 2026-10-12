@@ -126,6 +126,24 @@ def _cmd_info(_args: argparse.Namespace) -> None:
         else:
             print(f"  [falta] {label:18s} {'':>10}     {path}")
 
+    # P-25: de donde se esta importando el paquete. No puede detectar su propio
+    # fallo de import (si falla, este comando tampoco arranca; para eso esta
+    # `make check-env`), pero si delata un entorno mezclado: un `ampesm`
+    # importado desde site-packages en vez de src/ significa que se esta
+    # ejecutando una copia instalada y no el codigo que se esta editando.
+    import ampesm
+
+    from .config import PARAMS_PATH, ROOT, load_params
+
+    origen = ampesm.__file__ or "?"
+    esperado = str(ROOT / "src" / "ampesm" / "__init__.py")
+    print("\nEntorno:")
+    print(f"  paquete   {origen}")
+    if origen != esperado:
+        print(f"  AVISO: se esperaba {esperado}. Estas corriendo una copia instalada.")
+    if PARAMS_PATH.exists():
+        print(f"  features  hash {load_params().features_hash()} (P-24)")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(

@@ -45,6 +45,16 @@ split:
     # de segundos a horas con ~16 000 peptidos. 500 secuencias bastan de sobra
     # para el test binomial; null = auditar todo.
     max_test: 500
+    # Auditar tambien val contra train (P-27). val fija los hiperparametros y
+    # el umbral, y ese umbral se aplica a test, asi que la homologia val-train
+    # sesga las metricas de test AUNQUE test este limpio. Duplica el coste de
+    # la auditoria; null en max_val = usar max_test.
+    audit_val: true
+    max_val: null
+    # Deriva maxima tolerada de la tasa de positivos entre splits (P-26).
+    # PR-AUC, F1 y precision dependen de la prevalencia, y el umbral elegido en
+    # val se descalibra si test tiene otra. Avisa, no aborta.
+    positive_rate_tolerance: 0.05
 
 features:
   physchem_ph: 7.4

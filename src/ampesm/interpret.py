@@ -313,6 +313,45 @@ def _best_model_by_validation() -> str:
     return available[0]
 
 
+def _check_features_hash(tag: str, params) -> None:
+    """Aborta si `features` cambio desde que se entreno el modelo (P-24).
+
+    `error_analysis` recalcula los descriptores con la configuracion ACTUAL. Si
+    se cambio `features.moment_window` y se corre solo `interpret` sin
+    reentrenar, esos descriptores no son los que vio el modelo y el analisis
+    describe un modelo que no existe. No fallaba nada: salia una figura
+    plausible y equivocada.
+
+    Aborta en vez de avisar porque la salida es una figura que luego se publica,
+    y un aviso en medio de la consola no acompana a la figura.
+    """
+    meta_path = MODELS_DIR / f"{tag}.json"
+    if not meta_path.exists():
+        return
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+
+    stored = meta.get("features_hash")
+    if stored is None:
+        print(
+            f"[interpret] AVISO: {tag} se entreno antes de que se guardara "
+            "features_hash; no se puede comprobar la coherencia (P-24)."
+        )
+        return
+
+    current = params.features_hash()
+    if stored != current:
+        raise ValueError(
+            f"La seccion `features` de params.yaml cambio desde que se entreno "
+            f"{tag} (hash guardado {stored}, actual {current}). Los descriptores "
+            "del analisis de errores no serian los que vio el modelo. Reentrena "
+            "con 'make baselines' y 'make train', o devuelve `features` a su "
+            "valor anterior. Ver docs/09, P-24."
+        )
+
+
 def interpret_all(tag: str | None = None) -> None:
     """Corre todas las figuras de interpretacion."""
     ensure_dirs()
@@ -327,6 +366,7 @@ def interpret_all(tag: str | None = None) -> None:
         tag = _best_model_by_validation()
 
     print(f"[interpret] modelo elegido: {tag}")
+    _check_features_hash(tag, params)
     error_analysis(df, tag)
 
     models = params.embeddings.get("models", [])

@@ -144,7 +144,8 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 (not 3.14: PyTorch does
 not yet ship stable wheels for it).
 
 ```bash
-git clone <url> && cd Peptidos-antimicrobianos
+git clone https://github.com/rodrigohermoza/amp-classifier-esm2.git
+cd amp-classifier-esm2
 make setup
 make all
 ```

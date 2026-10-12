@@ -152,7 +152,8 @@ Requiere [uv](https://docs.astral.sh/uv/). Python 3.12 (no 3.14: PyTorch aún no
 publica ruedas estables para esa versión).
 
 ```bash
-git clone <url> && cd Peptidos-antimicrobianos
+git clone https://github.com/rodrigohermoza/amp-classifier-esm2.git
+cd amp-classifier-esm2
 make setup
 make all
 ```
@@ -187,7 +188,7 @@ src/ampesm/
   evaluate.py      métricas, bootstrap, figuras
   interpret.py     UMAP y análisis de errores
 docs/              cuaderno de laboratorio: decisiones, errores, mejoras
-tests/             114 casos; los descriptores se validan contra literatura
+tests/             117 casos; los descriptores se validan contra literatura
 params.yaml        todo lo ajustable en un solo archivo
 ```
 

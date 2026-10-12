@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-10-12T01:56:05+00:00",
+  "total_bytes": 5012599,
+  "entries": [
+    {
+      "source": "apd3",
+      "url": "https://aps.unmc.edu/assets/sequences/naturalAMPs_APD2024a.fasta",
+      "filename": "apd3_naturalAMPs_APD2024a.fasta",
+      "bytes": 150144,
+      "sha256": "b2d30bbbe57a383220d5fa68fda5a73728d2345f88585a78aa5f9e9546cd3d66",
+      "label": 1,
+      "license": "Uso academico con citacion; sin licencia abierta declarada. No se redistribuye.",
+      "citation": "Wang G., Li X., Wang Z. APD3: the antimicrobial peptide database as a tool for research and education. Nucleic Acids Research, 2016.",
+      "homepage": "https://aps.unmc.edu/",
+      "downloaded_at": "2026-10-12T01:54:47+00:00",
+      "reused_existing_file": false
+    },
+    {
+      "source": "dramp",
+      "url": "https://dramp.cpu-bioinfor.org/downloads/download.php?filename=download_data/DRAMP3.0_new/general_amps.xlsx",
+      "filename": "dramp_general_amps.xlsx",
+      "bytes": 2960502,
+      "sha256": "1f376e89596a01e0a186258ada2d2c29bcde2e520abfe2969a618b824958f25e",
+      "label": 1,
+      "license": "Uso academico y no comercial. No se redistribuye.",
+      "citation": "Shi G. et al. DRAMP 3.0: an enhanced comprehensive data repository of antimicrobial peptides. Nucleic Acids Research, 2022.",
+      "homepage": "https://dramp.cpu-bioinfor.org/",
+      "downloaded_at": "2026-10-12T01:55:52+00:00",
+      "reused_existing_file": false
+    },
+    {
+      "source": "uniprot_amp",
+      "url": "https://rest.uniprot.org/uniprotkb/stream?query=%28keyword%3AKW-0929%29+AND+%28length%3A%5B5+TO+50%5D%29&format=fasta",
+      "filename": "uniprot_antimicrobial.fasta",
+      "bytes": 196956,
+      "sha256": "03c44592bce8c908070295d5338b2d508c3d92d87cbbb4ca283d1b004606c77c",
+      "label": 1,
+      "license": "CC BY 4.0.",
+      "citation": "The UniProt Consortium. UniProt: the Universal Protein Knowledgebase.",
+      "homepage": "https://www.uniprot.org/",
+      "downloaded_at": "2026-10-12T01:56:01+00:00",
+      "reused_existing_file": false,
+      "query": "(keyword:KW-0929) AND (length:[5 TO 50])",
+      "declared_total": 1585
+    },
+    {
+      "source": "uniprot_neg",
+      "url": "https://rest.uniprot.org/uniprotkb/stream?query=%28length%3A%5B5+TO+50%5D%29+AND+%28reviewed%3Atrue%29+NOT+%28keyword%3AKW-0929%29+NOT+%28cc_function%3Aantimicrobial%29&format=fasta",
+      "filename": "uniprot_negatives.fasta",
+      "bytes": 1704997,
+      "sha256": "4068b1401fc3b17f396767ad3870f7900befc9660500528d29ddb2702c734e97",
+      "label": 0,
+      "license": "CC BY 4.0.",
+      "citation": "The UniProt Consortium. UniProt: the Universal Protein Knowledgebase.",
+      "homepage": "https://www.uniprot.org/",
+      "downloaded_at": "2026-10-12T01:56:04+00:00",
+      "reused_existing_file": false,
+      "query": "(length:[5 TO 50]) AND (reviewed:true) NOT (keyword:KW-0929) NOT (cc_function:antimicrobial)",
+      "declared_total": 11982
+    }
+  ]
+}

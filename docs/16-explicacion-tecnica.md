@@ -258,8 +258,17 @@ p-valor global:
 ```
 
 **Lo que hay que leer es `global_p_value` y `excess`.** No
-`fraction_over_threshold`, que dara ~30% y es ruido de fondo, ni
+`fraction_over_threshold`, que dara ~30-50% y es ruido de fondo, ni
 `excess_over_null_deprecated`.
+
+**Y la auditoria corre dos veces: test contra train y `val` contra train**
+(P-27). `val` fija los hiperparametros **y el umbral de decision**, y ese
+umbral se aplica despues a test, asi que entra en MCC, F1, sensibilidad,
+especificidad y precision: cinco de las siete metricas. Homologia val-train
+sesga las metricas de test **aunque test este limpio**; la fuga no necesita
+tocar test para contaminar test. `query_split` y `reference_split` son
+parametros de la misma funcion, y `max_val: null` significa "el mismo tope que
+test", no "audita val entero", que reintroduciria el coste cuadratico de P-19.
 
 Costo tres intentos y los dos primeros **no tenian potencia**: devolvian numeros
 plausibles y no detectaban nada con 20 parientes al 80% plantados a mano. El
@@ -285,6 +294,13 @@ El reporte incluye tambien `length_ks_pvalue` por split (Kolmogorov-Smirnov de
 la longitud entre clases dentro de cada split), porque el emparejado de
 longitudes es **global y no por split**, y un split puede quedar desbalanceado
 aunque el conjunto global no lo este.
+
+Y `positive_rate_drift` (P-26): la tasa de positivos no puede derivar entre
+splits, porque PR-AUC, F1 y precision dependen de la prevalencia y el umbral
+elegido en `val` se descalibra si `test` tiene otra. Habia un caso que pasaba
+**todas** las demas validaciones con `train` al 6% y `test` al 29%. Avisa y no
+aborta, por el criterio de D-18. Los splits vacios se excluyen: tienen
+`positive_rate = 0.0` por construccion y falsearian la deriva.
 
 ---
 
@@ -506,9 +522,14 @@ de UniProt es mucho peor que en los de APD3, el modelo depende de la procedencia
 y el resultado se lee con eso delante.
 
 `_best_model_by_validation` elige el modelo a interpretar por `val_roc_auc`
-leido de `results/models/*.json`, nunca por test. Queda abierto que cambiar
-`features.*` y correr solo `interpret` sin reentrenar no avisa; un hash de esa
-seccion en los JSON de modelos lo cerraria (P-24).
+leido de `results/models/*.json`, nunca por test.
+
+`_check_features_hash` **aborta** la etapa si la seccion `features` de
+`params.yaml` cambio desde que se entreno el modelo (P-24). `error_analysis`
+recalcula los descriptores con la configuracion actual, asi que con otra
+`moment_window` el analisis describiria un modelo que no existe, y no fallaba
+nada: salia una figura plausible y equivocada. Aborta en vez de avisar porque
+la salida es un PNG que se consume despues y viaja sin la consola (D-18).
 
 ---
 
@@ -523,10 +544,15 @@ seccion en los JSON de modelos lo cerraria (P-24).
   la coleccion con `No module named ampesm`, que parece un fallo del proyecto y
   es del entorno (P-13; reaparecio dos veces, y se arregla con
   `uv sync --reinstall-package ampesm`).
-- **118 tests.** Los que de verdad sostienen el proyecto: el invariante de
+- **129 tests.** Los que de verdad sostienen el proyecto: el invariante de
   clusteres entre splits, los descriptores contra valores publicados, el
-  detector de fuga contra fuga plantada, y la ablacion contra el renombrado de
-  sus propias columnas.
+  detector de fuga contra fuga plantada, la ablacion contra el renombrado de
+  sus propias columnas, la auditoria de val contra fuga plantada **solo en
+  val**, y la deriva de prevalencia contra el caso conocido 6%/29%.
+- **`make check-env`** comprueba que el paquete se importa antes de cada etapa
+  (P-25, cuarta reaparicion). Vive en el Makefile y no dentro de `ampesm info`
+  porque cuando el import falla, `info` tampoco arranca: una guarda que no
+  puede ejecutarse cuando ocurre el fallo que vigila no es una guarda.
 - **Dependencias del sistema:** `mmseqs2` (~30 MB, obligatorio para numeros
   publicables) y `libomp` (~2 MB, sin ella XGBoost no carga en macOS).
 
@@ -556,5 +582,11 @@ concretos:
 
 `data` corrido con fuentes reales: **18 644 peptidos**, los cuatro controles del
 reporte en orden. Las etapas 2-7 todavia no han visto datos reales y las tablas
-de resultados estan vacias a proposito. Lo pendiente y lo que queda por decidir,
-en [14-estado-y-continuacion.md](14-estado-y-continuacion.md).
+de resultados estan vacias a proposito.
+
+Hay una **fase 2 de generacion de peptidos** diseñada y sin implementar, cuyo
+encuadre es medir cuanto engaña un generador al clasificador propio y no diseñar
+farmacos: [17-diseno-generacion.md](17-diseno-generacion.md) y D-17.
+
+Lo pendiente y lo que queda por decidir, en
+[14-estado-y-continuacion.md](14-estado-y-continuacion.md).

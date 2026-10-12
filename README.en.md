@@ -140,6 +140,22 @@ turned out well:
   0.02–0.04 ROC-AUC), and the intervals may overlap. If the margin comes out
   large, the first thing to suspect is leakage, not success.
 
+## What comes next: a generation phase
+
+There is a second phase, designed but not yet implemented, that closes the loop
+with the 2023 project: using the classifier as a judge so that an algorithm
+**designs** new peptides, comparing a classic genetic algorithm against
+ESM-2-guided evolution — the same question as the first half, asked again.
+
+With a trap that is the interesting part: optimising against your own
+classifier is not design, it is an adversarial attack. An algorithm maximising
+its score converges on poly-arginine, which scores very high and is toxic and
+non-selective, because that region of sequence space has no negatives in any
+AMP database. So the stated result of that phase will not be "I designed new
+antimicrobials" but **how much the generator fools the classifier, and what
+guards are needed**. Full design in
+[docs/17-diseno-generacion.md](docs/17-diseno-generacion.md) (Spanish).
+
 ## Reproducing
 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.12 (not 3.14: PyTorch does

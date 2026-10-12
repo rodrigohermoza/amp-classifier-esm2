@@ -1,7 +1,7 @@
 # Estado del proyecto y como continuar
 
-**Ultima actualizacion: 2026-10-11 (repositorio publicado, `data` corrido con
-fuentes reales).** Este archivo es el punto de entrada para retomar el trabajo.
+**Ultima actualizacion: 2026-10-11 (repositorio publicado, `data` corrido,
+los cuatro arreglos previos a la tuberia hechos, fase 2 diseñada).** Este archivo es el punto de entrada para retomar el trabajo.
 Lo que esta hecho, lo que falta y lo que hay que decidir.
 
 ---
@@ -10,8 +10,10 @@ Lo que esta hecho, lo que falta y lo que hay que decidir.
 
 Codigo completo y auditado, publicado en
 <https://github.com/rodrigohermoza/amp-classifier-esm2>. **`data` ya corrio con
-fuentes reales: 18 644 peptidos.** Falta correr las etapas 2 a 7 y rellenar los
-resultados.
+fuentes reales: 18 644 peptidos.** **Lo siguiente es `make split` y el resto de
+la tuberia**, que es lo unico que queda para tener resultados. Hay una fase 2 de
+generacion diseñada y sin implementar en
+[17-diseno-generacion.md](17-diseno-generacion.md).
 
 ---
 
@@ -39,17 +41,17 @@ de fuga ven este volumen.
 
 | Metrica | Valor |
 |---|---|
-| Commits | 17 |
+| Commits | 20 |
 | Codigo en `src/` | 4 259 lineas, 16 modulos |
-| Tests | **118 casos, todos pasan** |
+| Tests | **129 casos, todos pasan** |
 | Documentacion | 3 945 lineas, 17 archivos |
 | Datos procesados | 18 644 peptidos (10 594 + / 8 050 -) |
 | Lint | ruff limpio |
 | Repositorio clonable | ~1 MB |
 | Entorno `.venv` | 1,0 GB |
 | Cache de pesos ESM-2 | 160 MB (`.cache/`, ignorada por git) |
-| Problemas registrados | 25 (P-01 a P-25); 2 abiertos: P-23 y P-24 |
-| Decisiones registradas | 16 (D-01 a D-16) |
+| Problemas registrados | 27 (P-01 a P-27); **1 abierto: P-23** |
+| Decisiones registradas | 18 (D-01 a D-18) |
 | Repositorio publico | <https://github.com/rodrigohermoza/amp-classifier-esm2> |
 
 ## Dependencias del sistema ya instaladas
@@ -71,14 +73,39 @@ longitudes, y la decision al respecto es D-16.
 Si hace falta rehacerlo: `make clean-data && make data`. Y si `ampesm` no
 importa, es P-25: `uv sync --reinstall-package ampesm && uv sync --extra dev`.
 
+### 1b. Los cuatro arreglos previos a la tuberia — HECHOS (2026-10-11)
+Los cuatro estaban pensados para proteger numeros que **todavia no se han
+publicado**, asi que se hicieron antes de correr nada:
+
+- **P-27**: la auditoria de fuga mira ahora tambien **val contra train**, no
+  solo test. val fija el umbral que se aplica a test, asi que la homologia
+  val-train sesga cinco de las siete metricas de test aunque test este limpio.
+  El reporte gana `train_val_identity_audit`.
+- **P-26**: se vigila la **deriva de la tasa de positivos** entre splits
+  (`positive_rate_drift` en el reporte, tolerancia 0.05). Avisa, no aborta.
+- **P-24**: hash de la seccion `features` guardado al entrenar y comprobado en
+  `interpret`, que **aborta** si cambio (criterio en D-18).
+- **P-25**: `make check-env` comprueba el import antes de cada etapa. Se valido
+  sola en vivo: el entorno se rompio por cuarta vez mientras se escribia.
+
+Queda **un solo problema abierto, P-23**, y esta deliberadamente abierto: no
+afecta a ningun numero publicable porque MMseqs2 es obligatorio y el respaldo
+marca `publishable: false`.
+
 ### 2. `make split` (siguiente, bloqueante)
 Usara MMseqs2. Que mirar en `data/processed/split_report.json`:
 
 - `publishable` debe ser `true`.
 - `train_test_identity_audit.leakage.global_p_value` por encima de 0.05 y
   `excess` cerca de 0. **Ese** es el numero de fuga. NO leer
-  `fraction_over_threshold` (dara ~30% y es ruido de fondo) ni
+  `fraction_over_threshold` (dara ~30-50% y es ruido de fondo) ni
   `excess_over_null_deprecated`. Historia en P-12, P-15 y P-18.
+- `train_val_identity_audit.leakage.global_p_value`: lo mismo para val. Si este
+  sale significativo y el de test no, el umbral se eligio sobre un conjunto
+  optimista y las metricas de test estan sesgadas igualmente (P-27).
+- `positive_rate_drift.exceeds_tolerance` debe ser `false`. Si es `true`,
+  PR-AUC, F1 y precision no son comparables entre splits y el umbral de val
+  esta descalibrado para test (P-26).
 - `splits.*.length_ks_pvalue`: si es muy bajo en `test`, la longitud sigue
   separando las clases dentro del split y conviene reportar la ablacion sin
   `length` ni `charge_density`.
@@ -91,7 +118,9 @@ entrena ahora **4 representaciones x 3 modelos**, porque D-16 añadio
 `comp_physchem_nolen`.
 
 **Tiempos medidos de `split`** (incluye la auditoria): 16 s con 600 peptidos,
-113 s con 3 900. Con 18 644 habra que ver: es la primera vez a este volumen. El
+113 s con 3 900. Con 18 644 habra que ver: es la primera vez a este volumen, y
+ademas P-27 **duplica** el coste de la auditoria porque ahora audita val tambien
+(se desactiva con `split.audit.audit_val: false` si hiciera falta). El
 coste de la auditoria esta topado por `split.audit.max_test` (500) para que no
 crezca de forma cuadratica (P-19); si tarda demasiado, bajar `null_replicates`
 de 20 a 10 lo reduce a la mitad.
@@ -109,7 +138,15 @@ inferencia del proyecto. El resto de la tabla es descriptiva.
   que encaje con el resultado**: esta puesta ahi justamente para poder
   contrastarla.
 
-### 6. Verificacion: las dos auditorias estan cerradas
+### 6. Fase 2: generacion de peptidos
+Diseñada y aprobada, sin implementar. Todo en
+[17-diseno-generacion.md](17-diseno-generacion.md). Lo esencial: el encuadre es
+**medir cuanto engaña el generador al clasificador**, no diseñar farmacos
+(D-17), hacen falta dos oraculos de representaciones distintas, y no empieza
+hasta que la clasificacion este corrida, porque un peptido con puntuacion 0.95
+de un clasificador cuyo rendimiento real se desconoce es un numero sin unidades.
+
+### 7. Verificacion: las dos auditorias estan cerradas
 
 **Llegaron los dos informes.** Entre ambos encontraron **11 fallos, todos
 introducidos por los arreglos anteriores y no por el codigo original**
@@ -122,8 +159,7 @@ introducidos por los arreglos anteriores y no por el codigo original**
   Mitigado por `publishable: false` y por MMseqs2 obligatorio (D-11). Bajar el
   prefiltro a 0,02-0,03 lo arreglaria, pero hay que medir el coste, que ya es
   el factor limitante.
-- **P-24**: cambiar `features.*` y correr solo `interpret` sin reentrenar no
-  avisa. Un hash de esa seccion en `results/models/*.json` lo cerraria.
+- ~~**P-24**~~: cerrado el 2026-10-11 con el hash de `features`.
 
 Lo que las auditorias **confirmaron como correcto**, ejecutandolo: la escala de
 Boman completa (20 valores, 0 discrepancias), el manejo de NaN en
@@ -135,12 +171,8 @@ guardas de P-10 con mensajes claros y sin trazas, que `ampesm all` y `make all`
 corren lo mismo, dos tuberias completas de principio a fin con 16 JSON validos
 y 8 figuras, y que los tests pasan aunque se retire el `.pth` del editable.
 
-Tambien quedan dos puntos de rigor del informe metodologico, no de correccion:
-
-- **La auditoria solo cubre test, no val.** `val` fija los hiperparametros y el
-  umbral, asi que la homologia val-train tambien infla la seleccion.
-- **No se valida la deriva de la tasa positiva entre splits.** Hay un caso que
-  pasa todas las comprobaciones con train al 6% de positivos y test al 29%.
+Los dos puntos de rigor del informe metodologico que quedaban (auditar val, y
+validar la deriva de la tasa positiva) **estan hechos**: P-27 y P-26.
 
 ---
 

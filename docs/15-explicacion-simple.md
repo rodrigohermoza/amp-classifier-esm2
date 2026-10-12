@@ -231,10 +231,25 @@ Lo del apartado 3: agrupar al 40% de parecido con una herramienta llamada
 MMseqs2, repartir grupos completos en 70% entrenamiento / 15% validacion / 15%
 medicion, y despues **auditar** que no se colo nadie.
 
-Hay tres cosas que vigilar aqui y el programa las vigila solo: que ningun grupo
-aparezca en dos lados a la vez (si eso falla, **ningun numero del proyecto
-vale**), que los tres trozos tengan ejemplos de las dos clases, y la auditoria
-de parentesco con su baraja de control.
+Hay cuatro cosas que vigilar aqui y el programa las vigila solo: que ningun
+grupo aparezca en dos lados a la vez (si eso falla, **ningun numero del
+proyecto vale**), que los tres trozos tengan ejemplos de las dos clases, la
+auditoria de parentesco con su baraja de control, y que la proporcion de AMPs
+sea parecida en los tres trozos.
+
+Esa ultima es menos obvia de lo que parece. Si entrenamiento tiene un 6% de
+AMPs y medicion un 29%, varias metricas dejan de ser comparables entre trozos,
+y el corte entre "si" y "no" que se eligio mirando un trozo queda mal puesto
+para el otro. Habia un caso que pasaba todas las demas comprobaciones con
+exactamente esas dos cifras.
+
+Y la auditoria de parentesco mira **dos** trozos, no uno. Lo natural es
+comprobar solo el de medicion, que es el que da el numero final. Pero el trozo
+de validacion es el que decide donde poner el corte, y ese corte se aplica
+luego al de medicion: si validacion tiene parientes en entrenamiento, el corte
+se eligio mirando datos demasiado faciles y **el numero final sale sesgado
+aunque el trozo de medicion este impecable**. La trampa no necesita tocar el
+trozo que mides para estropear lo que mides.
 
 **¿Por que tres trozos y no dos?** Porque hay decisiones que hay que tomar
 mirando datos: cuanta regularizacion, donde poner el corte entre "si" y "no".
@@ -347,17 +362,42 @@ del metodo.
 - **Todo lo ajustable vive en un solo archivo** (`params.yaml`): los umbrales,
   los tamaños, los modelos. Asi un cambio de configuracion aparece en el
   historial de git como lo que es, y no escondido en medio del codigo.
-- **118 pruebas automaticas.** No son adorno: una de ellas comprueba que ningun
+- **129 pruebas automaticas.** No son adorno: una de ellas comprueba que ningun
   grupo este en dos trozos a la vez, que es la pieza de la que depende la
   validez de todo lo demas. Otras comparan cada formula contra un valor
   publicado. Otra planta fuga de informacion a proposito y exige que la
-  auditoria la encuentre.
+  auditoria la encuentre, y otra la planta **solo en el trozo de validacion**
+  para comprobar que tambien se mira ahi.
 - **Un cuaderno de laboratorio** (esta carpeta `docs/`), con las decisiones y su
   justificacion, y con los 24 problemas reales que aparecieron y como se
   resolvieron. Incluidos los que me costo tres intentos y los que me cause yo
   mismo arreglando otra cosa.
 
-## 7. En que punto esta
+## 7. Lo que viene despues: generar peptidos
+
+Hay una segunda fase diseñada y todavia sin construir, y cierra el circulo con
+el proyecto de 2023: usar el clasificador como juez para que un programa
+**diseñe** peptidos nuevos.
+
+Tiene una trampa que es justo lo interesante. Si le pides a un algoritmo que
+busque la secuencia con la puntuacion mas alta de tu clasificador, va a
+encontrar algo como `RRRRRRRRRRRRRR`: catorce argininas seguidas. Puntua
+altisimo porque el clasificador aprendio que la carga positiva predice
+actividad, y es verdad que la predice. Pero eso es una porqueria conocida:
+toxica para tus propias celulas e inutil como medicamento. El clasificador no
+lo sabe porque **nadie publica catorce argininas en una base de datos de
+AMPs**, asi que nunca vio ejemplos de que eso sea malo.
+
+El generador, entonces, no encuentra buenos peptidos: encuentra **los puntos
+ciegos de tu propio clasificador**.
+
+Por eso el objetivo declarado de esa fase no es "diseñe antimicrobianos
+nuevos", sino *"construi un generador contra mi clasificador, medi cuanto lo
+engaña, y estas son las guardas que hacen falta"*. Es menos vistoso y es lo
+unico honesto sin un laboratorio detras. El diseño completo esta en
+[17-diseno-generacion.md](17-diseno-generacion.md).
+
+## 8. En que punto esta
 
 Bajados y limpiados los datos reales: **18 644 peptidos**. El codigo esta
 completo y auditado, pero las etapas de la 2 a la 7 todavia no han corrido con

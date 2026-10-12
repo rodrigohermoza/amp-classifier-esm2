@@ -22,6 +22,7 @@ se hizo asi, y **que salio mal** en el camino.
 | [14-estado-y-continuacion.md](14-estado-y-continuacion.md) | **Empieza aqui para retomar**: que esta hecho, que falta, que decidir |
 | [15-explicacion-simple.md](15-explicacion-simple.md) | **El proyecto entero explicado sin jerga**, de principio a fin |
 | [16-explicacion-tecnica.md](16-explicacion-tecnica.md) | **El proyecto entero en tecnico**: formulas, modulos, artefactos y el por que de cada eleccion |
+| [17-diseno-generacion.md](17-diseno-generacion.md) | **Fase 2**: diseño de la parte de generacion de peptidos, aprobado y sin implementar |
 
 ## Si vuelves al proyecto despues de un tiempo
 

@@ -148,6 +148,23 @@ salió bien:
   margen sale enorme, lo primero que hay que sospechar es fuga de información,
   no éxito.
 
+## Lo que viene: una fase de generación
+
+Hay una segunda fase diseñada y todavía sin implementar, que cierra el círculo
+con el proyecto de 2023: usar el clasificador como juez para que un algoritmo
+**diseñe** péptidos nuevos, comparando un algoritmo genético clásico contra una
+evolución guiada por ESM-2 —la misma pregunta de la primera mitad, hecha otra
+vez.
+
+Con una trampa que es justo lo interesante: optimizar contra tu propio
+clasificador no es diseño, es un ataque adversarial. Un algoritmo que maximice
+su puntuación converge en poli-arginina, que puntúa altísimo y es tóxica e
+inespecífica, porque esa región del espacio no tiene negativos en ninguna base
+de datos de AMPs. Así que el resultado declarado de esa fase no será "diseñé
+antimicrobianos nuevos" sino **cuánto engaña el generador al clasificador, y qué
+guardas hacen falta**. Diseño completo en
+[docs/17-diseno-generacion.md](docs/17-diseno-generacion.md).
+
 ## Reproducir
 
 Requiere [uv](https://docs.astral.sh/uv/). Python 3.12 (no 3.14: PyTorch aún no
@@ -190,7 +207,7 @@ src/ampesm/
   evaluate.py      métricas, bootstrap, figuras
   interpret.py     UMAP y análisis de errores
 docs/              cuaderno de laboratorio: decisiones, errores, mejoras
-tests/             117 casos; los descriptores se validan contra literatura
+tests/             129 casos; los descriptores se validan contra literatura
 params.yaml        todo lo ajustable en un solo archivo
 ```
 

@@ -39,10 +39,10 @@ de fuga ven este volumen.
 
 | Metrica | Valor |
 |---|---|
-| Commits | 15 |
-| Codigo en `src/` | 4 255 lineas, 16 modulos |
+| Commits | 17 |
+| Codigo en `src/` | 4 259 lineas, 16 modulos |
 | Tests | **118 casos, todos pasan** |
-| Documentacion | ~4 000 lineas, 17 archivos |
+| Documentacion | 3 945 lineas, 17 archivos |
 | Datos procesados | 18 644 peptidos (10 594 + / 8 050 -) |
 | Lint | ruff limpio |
 | Repositorio clonable | ~1 MB |

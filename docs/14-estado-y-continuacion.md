@@ -41,16 +41,16 @@ de fuga ven este volumen.
 
 | Metrica | Valor |
 |---|---|
-| Commits | 20 |
-| Codigo en `src/` | 4 259 lineas, 16 modulos |
+| Commits | 22 |
+| Codigo en `src/` | 4 445 lineas, 16 modulos |
 | Tests | **129 casos, todos pasan** |
-| Documentacion | 3 945 lineas, 17 archivos |
+| Documentacion | 4 551 lineas, 18 archivos |
 | Datos procesados | 18 644 peptidos (10 594 + / 8 050 -) |
 | Lint | ruff limpio |
 | Repositorio clonable | ~1 MB |
 | Entorno `.venv` | 1,0 GB |
 | Cache de pesos ESM-2 | 160 MB (`.cache/`, ignorada por git) |
-| Problemas registrados | 27 (P-01 a P-27); **1 abierto: P-23** |
+| Problemas registrados | 27 (P-01 a P-27, mas P-25b); **1 abierto: P-23** |
 | Decisiones registradas | 18 (D-01 a D-18) |
 | Repositorio publico | <https://github.com/rodrigohermoza/amp-classifier-esm2> |
 

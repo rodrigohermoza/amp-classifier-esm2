@@ -817,20 +817,34 @@ numero absoluto sigue siendo aceptable; la caracterizacion relativa estaba mal.
 
 ---
 
-## P-24 — Pendiente: cambiar `features` sin reentrenar no avisa
-**Fecha:** 2026-10-11 · **Estado:** ABIERTO
+## P-24 — Cambiar `features` sin reentrenar no avisaba
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
 
 Tras el arreglo de P-10f, `interpret.py` lee `params.yaml`, asi que los
 descriptores del analisis de errores coinciden con la configuracion **actual**.
 Pero si se cambia `features.moment_window` y se corre solo `interpret` sin
 reentrenar, esos descriptores ya **no** son los que vio el modelo, y nada lo
-detecta. Un hash de la seccion `features` guardado en `results/models/*.json` y
-comparado en `interpret` cerraria el hueco.
+detectaba. No fallaba nada: salia una figura plausible y equivocada, que es
+justo el tipo de salida que luego se publica.
+
+**Resolucion:** `Params.features_hash()` (sha256 de la seccion `features`,
+serializada con `sort_keys` para que no dependa del orden del YAML) se guarda
+en `results/models/*.json` al entrenar, y `_check_features_hash` lo compara en
+`interpret`.
+
+**Aborta en vez de avisar**, a diferencia de P-26. El criterio: un aviso sirve
+cuando la salida es un numero que el usuario esta leyendo en ese momento; no
+sirve cuando la salida es un PNG que se mira la semana siguiente, porque el
+aviso se queda en la consola y la figura viaja sola.
+
+Un modelo entrenado antes de este cambio no tiene el campo. En ese caso avisa y
+sigue: no se puede comprobar, pero romper la etapa por un modelo viejo seria
+peor que no comprobarlo.
 
 ---
 
 ## P-25 — El editable volvio a romperse, y justo al correr `data` por primera vez
-**Fecha:** 2026-10-11 · **Estado:** RESUELTO (tercera reaparicion de P-13)
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO, con guarda (tercera reaparicion de P-13)
 
 **Sintoma:** el primer `make data` de la historia del proyecto murio antes de
 tocar la red:
@@ -864,8 +878,15 @@ uv sync --extra dev
 real es el patron 2 de los tres de abajo (arreglar a medias). Y la señal de
 alarma deberia haber sido que P-13 ya habia reaparecido una vez: un fallo de
 entorno que vuelve dos veces no es mala suerte, es una condicion del entorno
-que hay que detectar explicitamente. `ampesm info` podria empezar comprobando
-su propio import y dando el comando de arreglo.
+que hay que detectar explicitamente.
+
+**Guarda añadida:** `make check-env` comprueba el import antes de cada etapa de
+la tuberia y, si falla, imprime los dos comandos del arreglo en el orden
+correcto. Vive en el **Makefile** y no dentro de `ampesm info`, que fue la
+primera idea y era mala: cuando el import falla, `ampesm info` tampoco arranca.
+Una guarda que no puede ejecutarse cuando ocurre el fallo que vigila no es una
+guarda. `ampesm info` si informa ahora de **desde donde** se importa el
+paquete, que delata un entorno mezclado (una copia instalada en vez de `src/`).
 
 ---
 
@@ -897,6 +918,102 @@ Los 271 conflictos de etiqueta son el otro numero interesante por si mismo:
 secuencias que una base da como AMP confirmado y UniProt no anota. Es una
 estimacion **por lo bajo** de la tasa de falsos negativos entre los negativos, y
 el README ya advertia de que existe; ahora tiene un numero.
+
+---
+
+## P-26 — La tasa de positivos podia derivar entre splits sin que nada avisara
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+**Sintoma:** ninguno. El informe metodologico lo encontro como un caso que pasa
+**todas** las validaciones existentes —ambas clases presentes, mas de 20
+positivos, mas de 10 clusteres, ningun cluster compartido— con `train` al 6% de
+positivos y `test` al 29%.
+
+**Por que importa, que es la parte que no es obvia:** PR-AUC, F1 y precision
+dependen de la prevalencia de la clase positiva. Con tasas distintas, las
+metricas de los tres splits **no son comparables entre si**. Y hay un efecto
+peor y mas silencioso: el umbral de decision se elige maximizando MCC en `val`
+y se aplica a `test`. Un umbral calibrado sobre un conjunto al 6% de positivos
+aplicado a uno al 29% esta simplemente descalibrado, y eso degrada las cuatro
+metricas que dependen del umbral sin que el modelo tenga nada de malo.
+
+**Causa:** `assign_splits` optimiza cuotas de secuencias y, dentro de eso,
+prefiere el split cuyo balance de clases se degrada menos. Es una preferencia,
+no una restriccion, asi que con clusteres grandes de una sola clase puede
+cederla entera sin violar nada.
+
+**Resolucion:** `_positive_rate_drift` compara las tasas de todos los splits no
+vacios y marca `exceeds_tolerance` si el rango supera
+`split.audit.positive_rate_tolerance` (0.05). Va al reporte y a la consola.
+
+**Avisa y no aborta**, al contrario que una division degenerada. Razon: una
+division degenerada no tiene arreglo —no se puede elegir un umbral sobre un
+`val` sin positivos—, mientras que una deriva moderada sigue siendo utilizable
+si se reporta. Lo que no se puede es no saberlo.
+
+**Detalle de implementacion que casi fue un bug:** un split vacio tiene
+`positive_rate = 0.0` por construccion, asi que incluirlo falsearia la deriva
+hasta el maximo posible. Se excluyen los splits con `n == 0`, y hay un test que
+lo fija.
+
+---
+
+## P-27 — La auditoria de fuga solo miraba test, y test no es el unico que importa
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+
+**Sintoma:** ninguno, y es el hallazgo mas sutil de los cuatro.
+`audit_train_test_identity` tenia `train` y `test` fijados dentro de la
+funcion. La auditoria verificaba, correctamente, que ninguna secuencia de test
+tuviera parientes en train.
+
+**El hueco:** `val` fija los hiperparametros **y el umbral de decision**. Ese
+umbral se aplica despues a `test`, asi que entra en MCC, F1, sensibilidad,
+especificidad y precision: **cinco de las siete metricas, incluida la principal
+preregistrada**. Si `val` tiene parientes en `train`, el umbral se eligio sobre
+un conjunto optimista y las metricas de test salen sesgadas **aunque test este
+perfectamente limpio**. La fuga no necesita tocar test para contaminar test.
+
+Lo mismo vale, en menor grado, para la seleccion de hiperparametros: elegir `C`
+de la logistica contra un `val` homologo a train elige el valor que mejor
+memoriza.
+
+**Resolucion:** `query_split` y `reference_split` son ahora parametros, y
+`build_splits` llama a la auditoria dos veces. El reporte gana
+`train_val_identity_audit`, con los mismos campos y los mismos avisos. Se
+controla con `split.audit.audit_val` y `split.audit.max_val`.
+
+**Dos trampas que se evitaron por haber aprendido de P-19 y P-20:**
+1. `max_val: null` en `params.yaml` significa "usa el mismo tope que test", no
+   "audita val entero". Lo segundo reintroduciria el coste cuadratico de P-19
+   por la puerta de atras, que es exactamente el patron 1 de los tres de abajo.
+2. El bloque que imprime el resultado se refactorizo a un bucle sobre las dos
+   auditorias, en vez de duplicarlo. Un bloque copiado habria quedado a medio
+   actualizar en el siguiente cambio.
+
+**Coste:** duplica el tiempo de la auditoria (otras 500 secuencias x 20
+barajas). Verificado de punta a punta con 840 secuencias sinteticas en
+familias: las dos auditorias corren, el JSON sale valido y el crudo de val
+(50.8% por encima de 0.4) frente al nulo (media 0.374) vuelve a ilustrar por
+que `fraction_over_threshold` no se puede leer solo.
+
+**Leccion:** la pregunta util no fue "¿esta bien la auditoria?" —lo estaba—
+sino "¿esta mirando todo lo que puede sesgar el numero que voy a publicar?".
+Un diagnostico correcto apuntado al sitio incompleto es el patron 2.
+
+---
+
+## P-25b — La guarda de entorno se valido sola, en vivo
+**Fecha:** 2026-10-11 · **Estado:** anecdota con moraleja
+
+Mientras se escribia la guarda de P-25, el entorno se rompio otra vez —cuarta
+vez— en medio del cambio. `uv run ampesm info` murio con el
+`ModuleNotFoundError` de siempre, y `make check-env`, recien escrito, lo
+detecto y dio el comando exacto de arreglo.
+
+No estaba planeado, pero es exactamente lo que pide D-15: la guarda se probo
+contra el caso positivo real y no solo contra un caso construido. Vale
+anotarlo porque la tentacion al escribir una guarda para un fallo intermitente
+es darla por buena sin verla disparar.
 
 ## Plantilla para entradas nuevas
 

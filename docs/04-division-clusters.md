@@ -176,8 +176,17 @@ marcadas sobre lo esperado por azar:
 }
 ```
 
+**La auditoria corre dos veces: test contra train y `val` contra train.** Lo
+natural es auditar solo test, que es el que da el numero publicado, pero `val`
+fija los hiperparametros y el umbral de decision, y ese umbral se aplica despues
+a test: entra en cinco de las siete metricas. Si `val` tiene parientes en train,
+el umbral se eligio sobre un conjunto optimista y las metricas de test salen
+sesgadas **aunque test este limpio**. La fuga no necesita tocar test para
+contaminar test (P-27).
+
 Validado plantando fuga conocida: detecta 20 parientes de 120 desde el 50% de
-identidad. Costo tres intentos llegar a un estadistico que funcionara, y los
+identidad, y hay un caso que la planta **solo en val** para comprobar que la
+auditoria de val la ve y la de test, correctamente, no. Costo tres intentos llegar a un estadistico que funcionara, y los
 dos primeros devolvian numeros plausibles sin detectar nada; la historia
 completa esta en [09-problemas-encontrados.md](09-problemas-encontrados.md),
 P-12, P-15 y P-18. La leccion que dejo: **un diagnostico que nunca se ha

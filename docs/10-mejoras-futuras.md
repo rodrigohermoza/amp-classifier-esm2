@@ -3,6 +3,29 @@
 Ordenadas por relacion entre esfuerzo y valor. Las primeras son las que de verdad
 cambiarian las conclusiones; las ultimas son vistosas pero aportan poco.
 
+> **Estado al 2026-10-11.** Lo que antes estaba en esta lista y ya esta hecho:
+> auditar `val` contra `train` (P-27), validar la deriva de la tasa de positivos
+> (P-26), el hash de `features` (P-24) y la guarda de entorno (P-25). La
+> **fase 2 de generacion** dejo de ser una idea de esta lista y tiene diseño
+> propio aprobado en [17-diseno-generacion.md](17-diseno-generacion.md).
+>
+> De lo que sigue aqui, el orden recomendado despues de tener resultados es
+> **M-01, luego los negativos barajados, luego M-02**. Y una que **no** se
+> recomienda hacer: bajar el prefiltro del respaldo de clustering (P-23). No
+> afecta a ningun numero publicable, porque MMseqs2 es obligatorio y el respaldo
+> marca `publishable: false`, y el mismo esfuerzo invertido en M-01 da una figura
+> publicable en vez de una nota de higiene. M-04 queda fuera de alcance mientras
+> la fase 2 este viva (D-17), y ademas su via buena ya no es recuperar DBAASP
+> sino parsear los MIC que DRAMP trae en 5 020 de sus filas (P-02).
+
+### Una mejora que cerraria la asimetria de D-16
+La ablacion `comp_physchem_nolen` quita la longitud al baseline y no a ESM-2, lo
+que sesga esa lectura a favor de los embeddings. Para cerrarlo haria falta un
+control del lado de los embeddings: **residualizar cada dimension contra la
+longitud** (ajustar una regresion de la dimension sobre la longitud y quedarse
+con el residuo) antes de entrenar. Esfuerzo bajo, y convierte una advertencia
+escrita en un numero. Tiene sentido hacerla junto con M-01.
+
 ## Alto valor, bajo esfuerzo
 
 ### M-01 — Curva de rendimiento frente al umbral de identidad

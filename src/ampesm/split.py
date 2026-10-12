@@ -572,9 +572,7 @@ def audit_train_test_identity(
 
     if reference.empty or query.empty:
         return {
-            "error": (
-                f"{reference_split} o {query_split} vacio; no se puede auditar"
-            ),
+            "error": (f"{reference_split} o {query_split} vacio; no se puede auditar"),
             "query_split": query_split,
             "reference_split": reference_split,
         }
@@ -730,9 +728,7 @@ def audit_train_test_identity(
         }
         report["n_above_noise_threshold"] = int((arr > noise_cut).sum())
         report["suggested_threshold_above_noise"] = round(noise_cut, 4)
-        report["flagged_ids"] = [
-            query_rows.iloc[i].id for i in range(len(arr)) if flagged[i]
-        ][:50]
+        report["flagged_ids"] = [query_rows.iloc[i].id for i in range(len(arr)) if flagged[i]][:50]
 
         # Se conserva el agregado por transparencia, marcado como lo que es.
         report["excess_over_null_deprecated"] = {
@@ -1056,9 +1052,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
                     if audit["query_split"] == "val"
                     else " Revisa el metodo de clustering antes de publicar."
                 )
-                print(
-                    f"[split] AVISO: fuga por homologia significativa en {label}.{extra}"
-                )
+                print(f"[split] AVISO: fuga por homologia significativa en {label}.{extra}")
 
     drift = report["positive_rate_drift"]
     print(

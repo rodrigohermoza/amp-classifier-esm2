@@ -311,3 +311,57 @@ tomada de antemano. Y si se quisiera cerrar la asimetria de arriba haria falta
 un control de longitud del lado de los embeddings (por ejemplo residualizar
 cada dimension contra la longitud), que esta en
 [10-mejoras-futuras.md](10-mejoras-futuras.md) y no en esta version.
+
+
+---
+
+## D-17 — La generacion se encuadra como medir el engaño, no como diseñar farmacos
+**Fecha:** 2026-10-11
+
+El proyecto tendra una fase 2 de generacion de peptidos, que cierra el arco con
+el proyecto de 2023 (donde el algoritmo genetico era de otros y el aporte fue
+la obtencion de datos). Diseño completo en
+[17-diseno-generacion.md](17-diseno-generacion.md).
+
+**El problema:** un generador que maximice la puntuacion del clasificador
+propio converge en poli-arginina. Esa region del espacio no tiene negativos en
+ninguna base de datos de AMPs, asi que el clasificador la puntua altisimo y la
+poli-arginina es, en la practica, toxica e inespecifica. El generador no
+encuentra peptidos buenos: encuentra los **puntos ciegos del clasificador**. Es
+un ataque adversarial contra el propio modelo, y la ley de Goodhart.
+
+**Decision:** el resultado declarado de la fase es *"construi un generador
+contra mi clasificador, medi cuanto lo engaña, y estas son las guardas"*, no
+*"diseñe antimicrobianos nuevos"*.
+
+**Por que es una decision y no una formalidad:** cambia todo el diseño. Si el
+objetivo es medir el engaño, hacen falta **dos oraculos** de representaciones
+distintas (el generador ve uno, la evaluacion usa el otro), hace falta un
+**control positivo** que esconda una familia real de AMPs y exija
+redescubrirla, y la metrica de exito **no puede ser** la puntuacion del oraculo
+que se esta optimizando. Con el encuadre ingenuo, ninguna de las tres piezas se
+habria construido.
+
+---
+
+## D-18 — Abortar o avisar: el criterio es donde acaba la salida
+**Fecha:** 2026-10-11
+
+P-24 y P-26 se arreglaron el mismo dia y con comportamientos opuestos: el hash
+de `features` **aborta** `interpret`, y la deriva de tasa positiva solo
+**avisa**. Conviene fijar el criterio para no decidirlo caso a caso.
+
+**Decision:**
+
+- **Abortar** cuando la salida de la etapa es un artefacto que viaja solo y se
+  consume despues: una figura PNG, un JSON de metricas. Un aviso en la consola
+  no acompaña al archivo, y el archivo se acaba publicando.
+- **Avisar** cuando el problema admite una lectura informada y el numero sigue
+  siendo util si se conoce: una deriva moderada de prevalencia se puede
+  reportar y leer con cuidado.
+- **Abortar siempre** si el resultado no tiene interpretacion posible: un `val`
+  sin positivos no permite elegir un umbral, punto.
+
+**Consecuencia asumida:** abortar es mas molesto. Se acepta porque el coste de
+una figura equivocada publicada es mayor que el de una etapa que hay que
+relanzar.

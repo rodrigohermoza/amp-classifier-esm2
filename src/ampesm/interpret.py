@@ -194,11 +194,18 @@ def error_analysis(df: pd.DataFrame, tag: str) -> dict:
         by_source[source] = entry
 
     # Pregunta 4: ¿el error depende de la longitud?
-    # P-10g: derivado de params.yaml. Con el borde cableado en 51, subir
-    # max_length dejaria los peptidos mas largos en NaN y groupby(observed=True)
-    # los descartaria del reporte en silencio.
-    max_len = int(load_params().data.get("max_length", 50))
-    bins = [4, 10, 20, 30, 40, max(51, max_len + 1)]
+    # Bins derivados de params.yaml en AMBOS extremos (P-22). La version
+    # anterior solo parametrizo el borde superior: el 4 seguia cableado, asi
+    # que con min_length < 4 los peptidos mas cortos caian fuera de todos los
+    # bins y groupby(observed=True) los descartaba en silencio, que es
+    # exactamente el fallo que P-10g decia arreglar, en la otra direccion.
+    # Los bordes intermedios van de 10 en 10 para que el ultimo bin no sea un
+    # unico cubo enorme cuando max_length es grande.
+    dcfg = load_params().data
+    min_len = int(dcfg.get("min_length", 5))
+    max_len = int(dcfg.get("max_length", 50))
+    bins = [min(4, min_len)] + list(range(10, max_len + 1, 10)) + [max_len + 1]
+    bins = sorted(set(bins))
     test["length_bin"] = pd.cut(test.length, bins=bins, right=False)
     by_length = {
         str(interval): {"n": int(len(sub)), "accuracy": round(float(sub.correct.mean()), 4)}

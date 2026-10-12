@@ -34,6 +34,18 @@ split:
     kmer_size: 3
     kmer_prefilter: 0.05
 
+  # Auditoria de fuga train-test (docs/04, docs/09 P-04/P-18).
+  audit:
+    # Barajas por secuencia para la distribucion nula. Mas replicas = p-valor
+    # con mas resolucion, pero el coste es LINEAL en este numero (P-19): pasar
+    # de 1 a 20 multiplico por 20 el coste de la etapa.
+    null_replicates: 20
+    # Submuestreo del conjunto de test. El coste de la auditoria crece de forma
+    # cuadratica con el tamano del conjunto, asi que sin tope la etapa pasaria
+    # de segundos a horas con ~16 000 peptidos. 500 secuencias bastan de sobra
+    # para el test binomial; null = auditar todo.
+    max_test: 500
+
 features:
   physchem_ph: 7.4
   # Ventana para el momento hidrofobico y angulo de la helice alfa.

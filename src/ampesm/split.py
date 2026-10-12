@@ -20,7 +20,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import PEPTIDES_PATH, SPLIT_REPORT_PATH, SPLITS_PATH, ensure_dirs, load_params
+from .config import (
+    METRICS_DIR,
+    PEPTIDES_PATH,
+    SPLIT_REPORT_PATH,
+    SPLITS_PATH,
+    ensure_dirs,
+    load_params,
+)
 
 # --- Utilidades ------------------------------------------------------------
 
@@ -739,6 +746,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     fractions = dict(scfg.get("fractions", {"train": 0.70, "val": 0.15, "test": 0.15}))
     methods = list(scfg.get("methods", ["mmseqs2", "cdhit", "builtin"]))
     bcfg = dict(scfg.get("builtin", {}))
+    acfg = dict(scfg.get("audit", {}))
 
     # P-10e: unas fracciones mal puestas dejarian la columna split en None, la
     # verificacion de fuga pasaria (0 valores unicos por cluster) y el fallo
@@ -871,6 +879,21 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             "identidad. Ver docs/09-problemas-encontrados.md, P-06."
         )
 
+    # P-20: una division nueva invalida cualquier prediccion anterior. El
+    # borrado vivia solo en el target del Makefile, asi que 'ampesm split' (y
+    # por tanto 'ampesm all') dejaba predicciones rancias que evaluate publicaba
+    # sin avisar. Se borra aqui, que es donde ocurre la invalidacion.
+    predictions_dir = METRICS_DIR / "predictions"
+    if predictions_dir.exists():
+        stale = list(predictions_dir.glob("*.csv"))
+        if stale:
+            for f in stale:
+                f.unlink()
+            print(
+                f"[split] {len(stale)} archivos de predicciones borrados: la division "
+                f"nueva los invalida. Reentrena con 'make baselines' y 'make train'."
+            )
+
     df.to_csv(SPLITS_PATH, index=False)
 
     cluster_sizes = df.groupby("cluster_id").size()
@@ -934,12 +957,15 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
 
     # P-04: la verificacion directa de la premisa del proyecto.
     print("[split] auditando identidad maxima test-vs-train...")
+    max_test = acfg.get("max_test", 500)
     report["train_test_identity_audit"] = audit_train_test_identity(
         df,
         threshold=identity,
         kmer_size=int(bcfg.get("kmer_size", 3)),
         prefilter=float(bcfg.get("kmer_prefilter", 0.05)),
+        max_test=None if max_test is None else int(max_test),
         seed=params.seed,
+        null_replicates=int(acfg.get("null_replicates", 20)),
     )
 
     SPLIT_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")

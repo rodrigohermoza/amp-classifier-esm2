@@ -1,6 +1,6 @@
 # Estado del proyecto y como continuar
 
-**Ultima actualizacion: 2026-10-11 (tras la segunda tanda de arreglos).** Este archivo es el punto de entrada para
+**Ultima actualizacion: 2026-10-11 (las dos auditorias cerradas).** Este archivo es el punto de entrada para
 retomar el trabajo. Lo que esta hecho, lo que falta y lo que hay que decidir.
 
 ---
@@ -34,7 +34,7 @@ de APD3 (P-01, con test de regresion y aviso si el conteo no es exactamente 1).
 
 | Metrica | Valor |
 |---|---|
-| Commits | 12 |
+| Commits | 14 |
 | Codigo en `src/` | 4 065 lineas, 16 modulos |
 | Tests | **117 casos, todos pasan** |
 | Documentacion | 2 110 lineas, 14 archivos |
@@ -42,7 +42,7 @@ de APD3 (P-01, con test de regresion y aviso si el conteo no es exactamente 1).
 | Repositorio clonable | ~1 MB |
 | Entorno `.venv` | 1,0 GB |
 | Cache de pesos ESM-2 | 160 MB (`.cache/`, ignorada por git) |
-| Problemas registrados | 18 (P-01 a P-18) |
+| Problemas registrados | 24 (P-01 a P-24); 2 abiertos: P-23 y P-24 |
 | Decisiones registradas | 15 (D-01 a D-15) |
 
 ## Dependencias del sistema ya instaladas
@@ -87,6 +87,11 @@ Usara MMseqs2. Que mirar en `data/processed/split_report.json`:
 Los pesos de ESM-2 ya estan en cache. Con ~16 000 peptidos, los embeddings
 tardaran del orden de 10-15 minutos en CPU para los dos modelos.
 
+**Tiempos medidos de `split`** (incluye la auditoria): 16 s con 600 peptidos,
+113 s con 3 900. El coste de la auditoria esta topado por `split.audit.max_test`
+(500) para que no crezca de forma cuadratica (P-19); si con el conjunto real
+tarda demasiado, bajar `null_replicates` de 20 a 10 lo reduce a la mitad.
+
 ### 4. `make evaluate` y `make interpret`
 Leer `results/metrics/comparison_embeddings_vs_baseline.json`, que es la unica
 inferencia del proyecto. El resto de la tabla es descriptiva.
@@ -100,33 +105,38 @@ inferencia del proyecto. El resto de la tabla es descriptiva.
   que encaje con el resultado**: esta puesta ahi justamente para poder
   contrastarla.
 
-### 6. Verificacion: una hecha, una pendiente
+### 6. Verificacion: las dos auditorias estan cerradas
 
-El **agente de verificacion metodologica si llego** y encontro 5 fallos nuevos
-introducidos por los propios arreglos (P-14 a P-18). Ya estan corregidos y
-documentados. Confirmo como correctos: la escala de Boman completa (20 valores
-contra la publicacion, 0 discrepancias), el manejo de NaN en `all_metrics` y
-`bootstrap_metrics`, la coincidencia real entre las etiquetas preregistradas y
-los nombres de archivo que genera `models.py`, que la siembra no rompe el
-invariante de no fuga y da proporciones 70/15/15 exactas, y el cambio de
-Jaccard a contencion.
+**Llegaron los dos informes.** Entre ambos encontraron **11 fallos, todos
+introducidos por los arreglos anteriores y no por el codigo original**
+(P-14 a P-24). Nueve estan corregidos; dos quedan abiertos a proposito:
 
-Quedan sin cerrar dos cosas de su informe, ambas de rigor y no de correccion:
+- **P-23**: el umbral efectivo del prefiltro del respaldo esta en 0,55-0,60, no
+  en el 0,40 declarado. Medido: a 0,43 de identidad real se agrupa el 68% de
+  los pares y el 32% restante lo descarta el prefiltro, no el test de
+  identidad. Es una mejora enorme frente al ~0,75 anterior, pero no es fiel.
+  Mitigado por `publishable: false` y por MMseqs2 obligatorio (D-11). Bajar el
+  prefiltro a 0,02-0,03 lo arreglaria, pero hay que medir el coste, que ya es
+  el factor limitante.
+- **P-24**: cambiar `features.*` y correr solo `interpret` sin reentrenar no
+  avisa. Un hash de esa seccion en `results/models/*.json` lo cerraria.
+
+Lo que las auditorias **confirmaron como correcto**, ejecutandolo: la escala de
+Boman completa (20 valores, 0 discrepancias), el manejo de NaN en
+`all_metrics` y `bootstrap_metrics`, que las etiquetas preregistradas coinciden
+con los nombres reales de archivo, la seleccion por validacion en `evaluate` e
+`interpret`, que la siembra no rompe el invariante y da 70/15/15 exactos, que
+los 5 casos de division degenerada abortan sin escribir archivos, las ocho
+guardas de P-10 con mensajes claros y sin trazas, que `ampesm all` y `make all`
+corren lo mismo, dos tuberias completas de principio a fin con 16 JSON validos
+y 8 figuras, y que los tests pasan aunque se retire el `.pth` del editable.
+
+Tambien quedan dos puntos de rigor del informe metodologico, no de correccion:
 
 - **La auditoria solo cubre test, no val.** `val` fija los hiperparametros y el
-  umbral, asi que la homologia val-train tambien infla la seleccion. Correr la
-  misma funcion para val cuesta lo mismo.
-- **No se valida la deriva de la tasa positiva entre splits.** Hay un caso
-  medido que pasa todas las comprobaciones actuales con train al 6% de
-  positivos y test al 29%, un cambio de prior de casi 5x. El reporte ya guarda
-  `positive_rate` por split, pero nadie lo mira.
-
-**El agente de verificacion de robustez seguia corriendo al compactar la
-sesion y su informe no se recibio.** Iba a comprobar las ocho guardas una por
-una, la degradacion de XGBoost, divisiones degeneradas, una corrida completa en
-copia, y el rendimiento del clustering con el prefiltro mas laxo (importante:
-bajo de 0.15 a 0.05, lo que hace mas alineamientos, y el ultimo dato medido era
-26 s con 16 000 secuencias **con el prefiltro viejo**). Conviene relanzarlo.
+  umbral, asi que la homologia val-train tambien infla la seleccion.
+- **No se valida la deriva de la tasa positiva entre splits.** Hay un caso que
+  pasa todas las comprobaciones con train al 6% de positivos y test al 29%.
 
 ---
 

@@ -173,10 +173,45 @@ cambios:
 | Verificacion metodologica | Medir el prefiltro corregido a varios niveles de identidad; comprobar si el corte temprano por cota superior puede descartar pares validos; validar la distribucion nula con fuga plantada; comprobar que test ya no influye en la seleccion; revisar la tabla de Radzicka y Wolfenden residuo a residuo |
 | Verificacion de robustez | Provocar las ocho guardas una por una; comprobar que XGBoost degrada sin tumbar la etapa; forzar divisiones degeneradas; corrida completa en una copia; medir el rendimiento del clustering con el prefiltro mas laxo |
 
-**Estado al compactar la sesion: ambos agentes seguian corriendo y sus
-informes no llegaron a registrarse aqui.** Si no se revisaron despues, conviene
-relanzarlos antes de publicar resultados. Ver
-[14-estado-y-continuacion.md](14-estado-y-continuacion.md), punto 6.
+**Ambos informes llegaron.** Resultados:
+
+| Agente | Tokens | Tiempo | Llamadas | Hallazgos |
+|---|---|---|---|---|
+| Verificacion metodologica | 148 748 | 11 min 14 s | 35 | 5 nuevos (P-14 a P-18) |
+| Verificacion de robustez | 233 131 | 45 min 45 s | 79 | 6 nuevos (P-19 a P-24) |
+| **Total** | **381 879** | | 114 | **11** |
+
+Los dos corrieron en solo lectura sobre copias. El de robustez ejecuto de
+verdad dos tuberias completas, valido los 16 JSON en modo estricto y midio el
+rendimiento del clustering a tres escalas.
+
+**Los 11 hallazgos son fallos que introdujeron los arreglos anteriores, no
+fallos del codigo original.** Ese es el dato que merece la pena retener de esta
+sesion. Tres patrones se repitieron:
+
+1. **Reintroducir el bug que acababas de arreglar en otro sitio.** P-14 volvio
+   a meter el caso corto-dentro-de-largo que P-03 habia corregido, porque se
+   copio la idea sin revisar sus condiciones.
+2. **Arreglar a medias.** P-20 puso la salvaguarda en el Makefile pero no en el
+   codigo; P-22 parametrizo el borde superior de unos bins y dejo el inferior
+   cableado.
+3. **Romper la viabilidad al arreglar la correctitud.** P-19: el nulo correcto
+   multiplico por 20 el coste y habria hecho la etapa inviable con datos
+   reales.
+
+Y el mas instructivo de todos, P-18: hicieron falta tres intentos para
+construir un detector de fuga que detectara fuga, y los tres primeros
+devolvian numeros plausibles sin encontrar nada.
+
+### Que funciono del encargo
+
+Pedir explicitamente **que confirmen lo correcto, no solo lo roto** resulto
+mas util de lo esperado: el informe de robustez confirma 11 items verificados
+por ejecucion, lo que permite distinguir "revisado y bien" de "no revisado".
+
+Y pedir **que busquen fallos introducidos por los arreglos** fue lo que
+produjo los 11 hallazgos. Un encargo generico de "revisa el codigo" habria
+vuelto a mirar el codigo viejo, que ya estaba auditado.
 
 ### Que se aprendio sobre el uso de agentes
 

@@ -632,6 +632,145 @@ numeros plausibles. Lo que rompio la racha no fue pensar mejor, fue **plantar
 fuga conocida y exigir que el detector la encontrara**. Un diagnostico que
 nunca se ha probado contra un caso positivo conocido no es un diagnostico.
 
+---
+
+## P-19 — La etapa `split` paso de segundos a horas
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO · **Introducido por el arreglo de P-18**
+
+**Sintoma:** ninguno funcional. Todo seguia correcto, solo que inviable.
+
+**Causa:** el nulo por secuencia de P-18 paso de **1** baraja a **20**, y el
+coste de la auditoria se multiplico exactamente por 20. Peor: el coste crece de
+forma cuadratica con el tamano del conjunto, porque cada secuencia de test se
+compara contra todo train.
+
+Medido por el agente de robustez:
+
+| n peptidos | n_test | etapa `split` |
+|---|---|---|
+| 600 | 88 | 19,3 s |
+| 2 000 | 298 | 152,6 s |
+| 4 000 | 598 | **526,2 s** |
+
+Atribucion a n=2 000: auditoria sin nulo 7,9 s, con nulo 160,1 s. El nulo era
+practicamente toda la etapa. Extrapolado a los ~16 000 peptidos reales:
+**alrededor de 2,3 horas solo en `split`**.
+
+**Resuelto asi:** una seccion `split.audit` en `params.yaml` con
+`null_replicates` (20) y `max_test` (500). Topar el conjunto auditado rompe el
+crecimiento cuadratico sin perder potencia: el test binomial con 500 secuencias
+detecta de sobra el exceso que importa. Medido tras el arreglo con 3 909
+peptidos: **113 s frente a 526 s**, 4,6 veces mas rapido, y el coste ya no
+crece con el tamano del test.
+
+**Leccion:** un arreglo de correctitud puede romper la viabilidad, y eso
+tambien es romperlo. El coste de un diagnostico debe mirarse al escribirlo, no
+cuando alguien espera dos horas. Que el proyecto solo se hubiera probado con
+600 peptidos sinteticos oculto el problema: **probar a una sola escala no es
+probar.**
+
+---
+
+## P-20 — `evaluate` publicaba predicciones rancias en silencio
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO · **Arreglo incompleto de P-10a**
+
+**Causa:** P-10a puso `rm -rf results/metrics/predictions` **solo en el target
+`split` del Makefile**. `ampesm split` no borraba nada, y por tanto tampoco
+`ampesm all`, que P-10h acababa de convertir en la tuberia completa. Ademas
+`evaluate_all` no tenia la comprobacion de ids que si tiene `interpret.py`.
+
+**Reproducido por el agente:** entrenar 9 modelos, reducir `peptides.csv` de
+586 a 480 filas, correr `ampesm split` y `ampesm evaluate`. Resultado: **9 de 9
+ficheros de metricas publicados**, cada uno con 106 ids inexistentes,
+**codigo de salida 0 y ningun aviso**. En una variante con XGBoost caido, el
+par **preregistrado** salio de un archivo rancio: la unica inferencia del
+proyecto calculada sobre un artefacto viejo.
+
+**Resuelto asi:** el borrado se mueve a `build_splits`, que es donde ocurre la
+invalidacion, y se avisa de cuantos archivos se borran. Y `evaluate_all`
+valida los ids contra `splits.csv` antes de calcular nada, igual que
+`interpret.py`.
+
+**Leccion:** poner una salvaguarda en el Makefile y no en el codigo deja fuera
+a quien use el CLI directamente. La invariante pertenece al sitio donde se
+rompe, no al atajo mas comodo para escribirla.
+
+---
+
+## P-21 — Los JSON de metricas podian no ser JSON valido
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO · **Agravado por el arreglo de P-07**
+
+**Causa:** `json.dumps` escribe `NaN` e `Infinity` literales, que Python relee
+sin quejarse pero que **no son JSON valido**: cualquier otro lector los
+rechaza. P-10d arreglo el `-Infinity` de `choose_threshold` pero no el NaN, y
+el arreglo de P-07 **agrando el agujero**: antes solo `roc_auc` podia ser NaN,
+ahora pueden serlo las siete metricas.
+
+**Resuelto asi:** `json_safe` convierte los valores no finitos en `null`, y
+`write_json` escribe con `allow_nan=False` avisando cuando hubo alguno. Se
+mapea a `null` en vez de fallar porque un NaN es informacion legitima (esa
+metrica no estaba definida) y perder el reporte entero por eso seria peor.
+
+---
+
+## P-22 — Los bins de longitud solo estaban parametrizados por arriba
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO · **Arreglo incompleto de P-10g**
+
+**Causa:** P-10g derivo el borde superior de `max_length` pero dejo el inferior
+cableado en 4. Con `min_length: 3`, los peptidos de 3 residuos caian fuera de
+todos los bins y `groupby(observed=True)` los descartaba **en silencio**:
+exactamente el fallo que P-10g decia arreglar, en la otra direccion.
+Verificado: 2 de 4 filas desaparecian. Ademas, con `max_length` grande el
+ultimo bin era un unico cubo de 40 residuos y el reporte por longitud dejaba de
+informar.
+
+**Resuelto asi:** los bordes se derivan de `min_length` y `max_length`, con
+pasos intermedios de 10.
+
+**Leccion:** al parametrizar una constante, mirar si tiene gemela. Dos de los
+arreglos de esta tanda (este y P-20) fallaron por quedarse a medio camino.
+
+---
+
+## P-23 — El umbral efectivo del prefiltro sigue por encima del declarado
+**Fecha:** 2026-10-11 · **Estado:** ABIERTO, documentado
+
+Medicion independiente sobre el codigo ya corregido:
+
+| Identidad real | Agrupan | Los descarta el prefiltro | Los descarta el test de identidad |
+|---|---|---|---|
+| 0,43 | 68% | **32%** | 0% |
+| 0,45 | 82% | 18% | 0% |
+| 0,52 | 96% | 4% | 0% |
+| 0,63 | 100% | 0% | 0% |
+
+El prefiltro de k-meros sigue siendo la restriccion que manda: **ni un solo par
+lo rechaza el test de identidad**. El umbral efectivo del respaldo esta en
+0,55-0,60, no en 0,40. Es una mejora enorme frente al ~0,75 de P-03, que daba
+entre 0% y 1% a 0,43, pero **no es el 0,40 declarado**.
+
+Mitigado en la practica por `publishable: false` y por que MMseqs2 es
+obligatorio para numeros publicables (D-11). Si alguna vez hiciera falta que el
+respaldo fuera fiel, hay que bajar el prefiltro a 0,02-0,03 y volver a medir
+el coste, que ya es el factor limitante (P-19).
+
+**Correccion de una afirmacion previa:** el docstring y P-03 decian que bajar
+el prefiltro de 0,15 a 0,05 costaba "casi el doble". Medido a 16 000
+secuencias: 2,2 s a 22,6 s, es decir **unas 10 veces mas**, no el doble. El
+numero absoluto sigue siendo aceptable; la caracterizacion relativa estaba mal.
+
+---
+
+## P-24 — Pendiente: cambiar `features` sin reentrenar no avisa
+**Fecha:** 2026-10-11 · **Estado:** ABIERTO
+
+Tras el arreglo de P-10f, `interpret.py` lee `params.yaml`, asi que los
+descriptores del analisis de errores coinciden con la configuracion **actual**.
+Pero si se cambia `features.moment_window` y se corre solo `interpret` sin
+reentrenar, esos descriptores ya **no** son los que vio el modelo, y nada lo
+detecta. Un hash de la seccion `features` guardado en `results/models/*.json` y
+comparado en `interpret` cerraria el hueco.
+
 ## Plantilla para entradas nuevas
 
 ```

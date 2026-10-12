@@ -15,6 +15,7 @@ docs/07-evaluacion.md:
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 
 import numpy as np
@@ -27,7 +28,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from .config import FIGURES_DIR, METRICS_DIR, ensure_dirs, load_params
+from .config import FIGURES_DIR, METRICS_DIR, SPLITS_PATH, ensure_dirs, load_params
 from .models import PREDICTIONS_DIR
 
 # Metricas que dependen de un umbral y metricas que no. La distincion importa
@@ -48,6 +49,37 @@ def threshold_metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
         "specificity": float(tn / (tn + fp)) if (tn + fp) else 0.0,
         "precision": float(tp / (tp + fp)) if (tp + fp) else 0.0,
     }
+
+
+def json_safe(obj):
+    """Convierte NaN e infinitos en null para que el JSON sea valido.
+
+    P-21: `json.dumps` escribe `NaN` e `Infinity` tal cual, que Python relee
+    sin quejarse pero **no son JSON valido**: cualquier otro lector los
+    rechaza. El arreglo de P-07 agrando el agujero, porque antes solo
+    `roc_auc` podia salir NaN y ahora pueden las siete metricas.
+
+    Se mapean a `null` en vez de hacer fallar la escritura: un NaN en una
+    metrica es informacion legitima (ese remuestreo no estaba definido) y
+    perder el resto del reporte por eso seria peor.
+    """
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list | tuple):
+        return [json_safe(v) for v in obj]
+    return obj
+
+
+def write_json(path, payload) -> None:
+    """Escribe JSON valido, avisando si hubo valores no finitos."""
+    safe = json_safe(payload)
+    if safe != payload:
+        print(f"[eval] AVISO: {path.name} contiene metricas no definidas (null en el JSON)")
+    path.write_text(
+        json.dumps(safe, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8"
+    )
 
 
 METRIC_NAMES = ("roc_auc", "pr_auc", "mcc", "f1", "sensitivity", "specificity", "precision")
@@ -493,9 +525,24 @@ def evaluate_all() -> pd.DataFrame:
 
     print(f"[eval] {len(files)} modelos; bootstrap de {n_boot} por {unit}")
 
+    # P-20: la misma comprobacion que hace interpret.py. Sin ella, unas
+    # predicciones de una corrida anterior se publicaban como metricas sin un
+    # solo aviso, y en un caso la comparacion preregistrada (la unica
+    # inferencia del proyecto) salio de un archivo rancio.
+    if not SPLITS_PATH.exists():
+        raise FileNotFoundError(f"Falta {SPLITS_PATH}. Corre 'make split' primero.")
+    valid_ids = set(pd.read_csv(SPLITS_PATH, usecols=["id"]).id)
+
     for path in files:
         tag = path.stem
         df = pd.read_csv(path)
+        missing = set(df.id) - valid_ids
+        if missing:
+            raise RuntimeError(
+                f"{tag}: {len(missing)} predicciones con ids que no estan en "
+                f"splits.csv, asi que son de una corrida anterior. Reentrena con "
+                f"'make baselines' y 'make train'."
+            )
         val = df[df.split == "val"]
         test = df[df.split == "test"]
 
@@ -527,9 +574,7 @@ def evaluate_all() -> pd.DataFrame:
             "bootstrap_unit": unit,
             "ci": ci,
         }
-        (METRICS_DIR / f"{tag}.json").write_text(
-            json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        write_json(METRICS_DIR / f"{tag}.json", record)
 
         row = {"tag": tag, "threshold": threshold, "n_test": len(test)}
         for name, values in metrics.items():
@@ -579,9 +624,7 @@ def evaluate_all() -> pd.DataFrame:
             "summary.csv con los 13 modelos es descriptiva; la unica inferencia "
             "del proyecto es esta comparacion emparejada. Ver docs/09, P-05."
         )
-        (METRICS_DIR / "comparison_embeddings_vs_baseline.json").write_text(
-            json.dumps(comparison, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        write_json(METRICS_DIR / "comparison_embeddings_vs_baseline.json", comparison)
         print(f"\n[eval] comparacion preregistrada (seleccion: {selection_basis})")
         print(f"[eval] {best_emb}  frente a  {best_base}")
         print(

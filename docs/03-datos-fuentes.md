@@ -18,7 +18,7 @@ datos se clona en segundos.
 | Fuente | Rol | Archivo | Tamano medido | Registros |
 |---|---|---|---|---|
 | APD3 | Positivos | `naturalAMPs_APD2024a.fasta` | 150 144 B (147 KB) | 3 306 |
-| DRAMP 3.0 | Positivos | `general_amps.xlsx` | 2 960 502 B (2,8 MB) | por confirmar al parsear |
+| DRAMP 3.0 | Positivos | `general_amps.xlsx` | 2 960 502 B (2,8 MB) | 12 784 |
 | UniProt (KW-0929) | Positivos | FASTA via API REST | ~0,2 MB | 1 585 |
 | UniProt (sin KW-0929) | Negativos | FASTA via API REST | ~1,5 MB | 11 982 |
 | **Total** | | | **~5 MB** | |
@@ -26,6 +26,30 @@ datos se clona en segundos.
 Los conteos de UniProt vienen de la cabecera `x-total-results` de la API,
 consultada el 2026-10-11. Pueden variar en releases posteriores; el manifiesto
 guarda el conteo real de cada corrida.
+
+### Lo que quedo despues de limpiar (corrida real del 2026-10-11)
+
+| Paso | Registros |
+|---|---|
+| Parseados de las cuatro fuentes | 29 657 |
+| Tras filtros de alfabeto y longitud (5-50) | 25 557 |
+| Tras deduplicado exacto | 18 683 (6 874 duplicados, **271 conflictos de etiqueta**) |
+| Tras emparejado de longitudes | **18 644** (10 594 positivos, 8 050 negativos) |
+
+Por fuente en el conjunto final: `uniprot_neg` 8 050, `dramp` 7 173, `apd3`
+2 872, `uniprot_amp` 549. Los 6 874 duplicados son esperables por el
+solapamiento entre DRAMP y APD3.
+
+Dos numeros de esa tabla merecen leerse despacio:
+
+- **271 conflictos de etiqueta**: secuencias que una base da como AMP
+  confirmado y UniProt no anota. Se resuelven a favor del positivo, y el numero
+  es una estimacion **por lo bajo** de la tasa de falsos negativos entre los
+  negativos (~3.4%). Es la debilidad del conjunto, cuantificada.
+- **Longitud media: positivos 22.9, negativos 30.6**, con un `deficit` de
+  emparejado de 23 732. El emparejado de longitudes no se puede cumplir porque
+  UniProt no tiene suficientes peptidos cortos revisados, asi que la longitud
+  queda como atajo disponible. Ver D-16.
 
 ---
 

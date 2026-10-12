@@ -7,8 +7,9 @@ de un modelo de lenguaje de proteínas (ESM-2) contra descriptores
 fisicoquímicos, con división de datos por clústeres de identidad de secuencia
 para evitar fuga de información.
 
-> **Estado: código completo, pendiente de ejecución.**
-> Las tablas de resultados están vacías a propósito. Se rellenan corriendo la
+> **Estado: datos construidos, modelos pendientes de ejecución.**
+> `make data` ya corrió contra las fuentes reales: 18 644 péptidos. Las tablas
+> de resultados están vacías a propósito. Se rellenan corriendo el resto de la
 > tubería, y los números saldrán de `results/metrics/`, no de una estimación.
 
 ## Por qué este proyecto
@@ -83,11 +84,12 @@ conjunto.
 | Fuente | Rol | Registros | Tamaño | Licencia |
 |---|---|---|---|---|
 | [APD3](https://aps.unmc.edu/) | Positivos | 3 306 | 147 KB | Académica, con citación |
-| [DRAMP 3.0](https://dramp.cpu-bioinfor.org/) | Positivos | — | 2,8 MB | Académica, no comercial |
+| [DRAMP 3.0](https://dramp.cpu-bioinfor.org/) | Positivos | 12 784 | 2,8 MB | Académica, no comercial |
 | [UniProt](https://www.uniprot.org/) KW-0929 | Positivos | 1 585 | ~0,2 MB | CC BY 4.0 |
 | UniProt sin KW-0929, revisados | Negativos | 11 982 | ~1,5 MB | CC BY 4.0 |
 
-Tamaños y conteos medidos el 2026-10-11. Total ≈ 5 MB.
+Tamaños y conteos medidos el 2026-10-11. Total ≈ 5 MB. Tras limpiar quedan
+**18 644 péptidos** (10 594 positivos, 8 050 negativos).
 
 Limpieza: solo los 20 aminoácidos estándar, longitud 5–50, deduplicado por
 secuencia exacta y emparejado de longitud. Detalle en
@@ -109,7 +111,7 @@ descarga → limpieza → clústeres al 40% → ┬→ descriptores ┬→ model
 |---|---|
 | **División** | MMseqs2 al 40% de identidad (obligatorio para resultados publicables); respaldo en CD-HIT y en un clustering propio en Python para que el repo funcione recién clonado. Clústeres completos a train/val/test (70/15/15), con validación que aborta si algún split queda degenerado. |
 | **Auditoría de fuga** | Identidad máxima de cada secuencia de test contra **todo** train, comparada contra una distribución nula (las mismas secuencias con los residuos barajados). Lo que se reporta como fuga es el **exceso sobre el nulo**, porque la identidad entre péptidos cortos tiene un ruido de fondo del ~33%. |
-| **Baselines** | Composición de aminoácidos (20 features) y 11 descriptores fisicoquímicos (carga neta por Henderson-Hasselbalch, GRAVY, momento hidrofóbico de Eisenberg, pI, índice de Boman…) con regresión logística, random forest y XGBoost. |
+| **Baselines** | Composición de aminoácidos (20 features) y 11 descriptores fisicoquímicos (carga neta por Henderson-Hasselbalch, GRAVY, momento hidrofóbico de Eisenberg, pI, índice de Boman…) con regresión logística, random forest y XGBoost. Se entrena además una **ablación sin `length` ni `charge_density`**: los negativos son 7,8 residuos más largos de media y el emparejado de longitudes no puede corregirlo, así que la diferencia entre el baseline completo y la ablación mide cuánto de él era longitud. |
 | **Embeddings** | ESM-2 8M y 35M, media por residuo con máscara explícita de relleno y tokens especiales, cacheados en disco. Logística y un MLP pequeño encima. |
 | **Evaluación** | ROC-AUC, PR-AUC, MCC y F1 con IC del 95% por bootstrap de clústeres. Umbral elegido en validación. Comparación emparejada entre el par **preregistrado**, nunca entre los ganadores en test. |
 | **Interpretación** | UMAP por clase, fuente y split; análisis de errores por categoría, fuente y longitud. |

@@ -1,15 +1,17 @@
 # Estado del proyecto y como continuar
 
-**Ultima actualizacion: 2026-10-11 (las dos auditorias cerradas).** Este archivo es el punto de entrada para
-retomar el trabajo. Lo que esta hecho, lo que falta y lo que hay que decidir.
+**Ultima actualizacion: 2026-10-11 (repositorio publicado, `data` corrido con
+fuentes reales).** Este archivo es el punto de entrada para retomar el trabajo.
+Lo que esta hecho, lo que falta y lo que hay que decidir.
 
 ---
 
 ## Resumen en una linea
 
-Codigo completo y auditado, tuberia verificada de punta a punta con datos
-sinteticos. **Nunca se ha corrido contra datos reales.** Falta eso y rellenar
-los resultados.
+Codigo completo y auditado, publicado en
+<https://github.com/rodrigohermoza/amp-classifier-esm2>. **`data` ya corrio con
+fuentes reales: 18 644 peptidos.** Falta correr las etapas 2 a 7 y rellenar los
+resultados.
 
 ---
 
@@ -17,7 +19,7 @@ los resultados.
 
 | Etapa | Codigo | Probado con sinteticos | Corrido con datos reales |
 |---|---|---|---|
-| `data` (descarga + limpieza) | si | **no** | **no** |
+| `data` (descarga + limpieza) | si | si | **si, 2026-10-11** |
 | `split` (clusteres + division) | si | si, con MMseqs2 | no |
 | `baselines` (9 modelos) | si | si, XGBoost incluido | no |
 | `embeddings` (ESM-2 8M y 35M) | si | si, pesos ya en cache | no |
@@ -25,25 +27,30 @@ los resultados.
 | `evaluate` (metricas + IC + figuras) | si | si | no |
 | `interpret` (UMAP + errores) | si | si, 8 figuras | no |
 
-**La unica etapa que nunca se ha ejecutado es `data`**, y es justamente donde
-esta el riesgo que queda: el parseo del XLSX real de DRAMP (nombres de columna
-cambiantes, por eso la deteccion es por patron) y la cabecera espuria del FASTA
-de APD3 (P-01, con test de regresion y aviso si el conteo no es exactamente 1).
+**`data` ya corrio** y los cuatro controles salieron en orden (detalle en
+[09](09-problemas-encontrados.md), seccion "Que dijo la primera corrida real"):
+la cabecera espuria de APD3 fue exactamente 1, DRAMP encontro la columna
+correcta, 271 conflictos de etiqueta y un `deficit` de emparejado de longitudes
+de **23 732**, que es el numero que motivo D-16. El riesgo que queda esta ahora
+en `split` con 18 644 secuencias: es la primera vez que MMseqs2 y la auditoria
+de fuga ven este volumen.
 
 ## Numeros actuales
 
 | Metrica | Valor |
 |---|---|
-| Commits | 14 |
-| Codigo en `src/` | 4 065 lineas, 16 modulos |
-| Tests | **117 casos, todos pasan** |
-| Documentacion | 2 110 lineas, 14 archivos |
+| Commits | 15 |
+| Codigo en `src/` | 4 255 lineas, 16 modulos |
+| Tests | **118 casos, todos pasan** |
+| Documentacion | ~4 000 lineas, 17 archivos |
+| Datos procesados | 18 644 peptidos (10 594 + / 8 050 -) |
 | Lint | ruff limpio |
 | Repositorio clonable | ~1 MB |
 | Entorno `.venv` | 1,0 GB |
 | Cache de pesos ESM-2 | 160 MB (`.cache/`, ignorada por git) |
-| Problemas registrados | 24 (P-01 a P-24); 2 abiertos: P-23 y P-24 |
-| Decisiones registradas | 15 (D-01 a D-15) |
+| Problemas registrados | 25 (P-01 a P-25); 2 abiertos: P-23 y P-24 |
+| Decisiones registradas | 16 (D-01 a D-16) |
+| Repositorio publico | <https://github.com/rodrigohermoza/amp-classifier-esm2> |
 
 ## Dependencias del sistema ya instaladas
 
@@ -56,21 +63,15 @@ brew install libomp    # sin ella XGBoost no carga en macOS (P-09)
 
 ## Lo que falta, en orden
 
-### 1. Correr `make data` (bloqueante)
-Descarga ~5 MB de APD3, DRAMP y UniProt. Es la primera vez que el parser toca
-datos reales. Que mirar en `data/processed/clean_report.json`:
+### 1. `make data` — HECHO (2026-10-11)
+18 644 peptidos en 83 s, 5.01 MB de red. Los cuatro controles y su lectura, en
+[09](09-problemas-encontrados.md). Lo unico que salio mal fue el emparejado de
+longitudes, y la decision al respecto es D-16.
 
-- `parse[apd3].dropped_empty` **debe ser exactamente 1** (P-01). Si no, el
-  formato de APD3 cambio.
-- `parse[dramp].sequence_column` y `n_columns`: confirmar que encontro la
-  columna correcta.
-- `deduplicate.label_conflicts`: secuencias presentes como positivas y
-  negativas. Es una estimacion por lo bajo del ruido en los negativos y un
-  numero interesante por si mismo.
-- `length_matching.deficit`: si es alto, el emparejado de longitudes no se
-  cumple bien.
+Si hace falta rehacerlo: `make clean-data && make data`. Y si `ampesm` no
+importa, es P-25: `uv sync --reinstall-package ampesm && uv sync --extra dev`.
 
-### 2. `make split`
+### 2. `make split` (siguiente, bloqueante)
 Usara MMseqs2. Que mirar en `data/processed/split_report.json`:
 
 - `publishable` debe ser `true`.
@@ -84,13 +85,16 @@ Usara MMseqs2. Que mirar en `data/processed/split_report.json`:
 - `mixed_label_clusters`: clusteres con ambas clases.
 
 ### 3. `make baselines`, `make embeddings`, `make train`
-Los pesos de ESM-2 ya estan en cache. Con ~16 000 peptidos, los embeddings
-tardaran del orden de 10-15 minutos en CPU para los dos modelos.
+Los pesos de ESM-2 ya estan en cache. Con 18 644 peptidos, los embeddings
+tardaran del orden de 10-20 minutos en CPU para los dos modelos. `baselines`
+entrena ahora **4 representaciones x 3 modelos**, porque D-16 añadio
+`comp_physchem_nolen`.
 
 **Tiempos medidos de `split`** (incluye la auditoria): 16 s con 600 peptidos,
-113 s con 3 900. El coste de la auditoria esta topado por `split.audit.max_test`
-(500) para que no crezca de forma cuadratica (P-19); si con el conjunto real
-tarda demasiado, bajar `null_replicates` de 20 a 10 lo reduce a la mitad.
+113 s con 3 900. Con 18 644 habra que ver: es la primera vez a este volumen. El
+coste de la auditoria esta topado por `split.audit.max_test` (500) para que no
+crezca de forma cuadratica (P-19); si tarda demasiado, bajar `null_replicates`
+de 20 a 10 lo reduce a la mitad.
 
 ### 4. `make evaluate` y `make interpret`
 Leer `results/metrics/comparison_embeddings_vs_baseline.json`, que es la unica
@@ -142,14 +146,25 @@ Tambien quedan dos puntos de rigor del informe metodologico, no de correccion:
 
 ## Decisiones abiertas para Rodrigo
 
-1. **¿Publicar el repositorio ahora o cuando haya resultados?** Recomendacion:
-   cuando haya resultados, para que la primera impresion no sea un repositorio
-   con tablas vacias.
-2. **Nombre publico.** La carpeta es `Peptidos-antimicrobianos`; para un CV en
-   ingles, `amp-classifier-esm2` dice mas de un vistazo.
-3. **¿Se intenta recuperar DBAASP?** Es lo que habilita la regresion de MIC
-   (P-02, D-07). Vias: descarga manual desde un navegador, un espejo en Zenodo,
-   o usar los valores de MIC que DRAMP trae en sus metadatos.
+**Cerradas el 2026-10-11:**
+- *Publicar ahora o esperar*: se publico ahora, con las tablas vacias y el
+  aviso de "pendiente de ejecucion" en los dos README.
+- *Nombre publico*: `amp-classifier-esm2`. La carpeta local sigue llamandose
+  `Peptidos-antimicrobianos`, que no afecta a nada.
+- *El confusor de longitud* (punto 4 de la lista anterior): ablacion, no
+  emparejado por split. Razonamiento completo en D-16.
+
+**Abierta:**
+
+1. **¿Se hace la regresion de MIC con los MIC de DRAMP?** El reexamen de P-02
+   cambia el planteamiento: DBAASP no cambio de dominio, su portada responde y
+   lo que esta roto es todo lo que devuelve datos (200 con 0 bytes, incluida la
+   documentacion de su API). Pero **DRAMP trae MIC en 5 020 de sus 12 784
+   filas**, en `Target_Organism` como texto libre, y ese archivo ya se descarga
+   y ya se parsea. Lo que cuesta es el parser: regex sobre `MIC=`/`MIC≤`,
+   unificar `μg/ml` frente a `µM` (necesita peso molecular) y decidir como
+   colapsar varios organismos por peptido. Sigue fuera de alcance (D-07) hasta
+   que se decida.
 
 ---
 
@@ -185,10 +200,15 @@ no instale ~60 MB de babel y jedi.
 3. **El respaldo de clustering agrupa la mitad de los pares a 40-45% de
    identidad.** Medido de extremo a extremo. Es la razon de D-11; MMseqs2 es
    obligatorio para publicar. Tabla de recall en docs/04.
-4. **El emparejado de longitudes es global, no por split.** El reporte incluye
-   ahora un KS por split para detectarlo, pero si sale mal hay que decidir entre
-   emparejar por split o publicar la ablacion sin `length`.
-5. **La etapa `data` nunca se ejecuto.**
+4. **La longitud separa las clases y no se puede corregir emparejando.**
+   Confirmado con datos reales: positivos 22.9 residuos de media, negativos
+   30.6, y un `deficit` de 23 732 negativos cortos que no existen en UniProt.
+   Mitigado, no resuelto, con la ablacion `comp_physchem_nolen` (D-16). El KS
+   por split sigue reportandose como diagnostico.
+5. **La ablacion de D-16 es asimetrica**: quita la longitud al baseline y no a
+   ESM-2, asi que esa lectura esta sesgada a favor de los embeddings. Por eso
+   la comparacion preregistrada sigue siendo contra `comp_physchem` completo.
+6. **Las etapas 2 a 7 nunca se han ejecutado con datos reales.**
 
 ---
 

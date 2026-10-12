@@ -75,6 +75,62 @@ que no necesita DBAASP. Ver [08-decisiones.md](08-decisiones.md), D-07.
 que depende de ella. Comprobar las cuatro fuentes al principio costo unos minutos
 y cambio el alcance del proyecto; descubrirlo en la etapa 5 habria costado dias.
 
+### Reexamen del 2026-10-11 (tarde): no es un cambio de dominio
+
+Se volvio a sondear, y el diagnostico cambia en un punto importante:
+
+| Ruta | Resultado ahora |
+|---|---|
+| `https://dbaasp.org/` | **HTTP 200, 9 833 bytes** |
+| `https://dbaasp.org/api/v1` | HTTP 200, 0 bytes |
+| `https://dbaasp.org/api/v1/peptides?limit=1` | HTTP 200, 0 bytes |
+| `https://dbaasp.org/api/v1/peptides/1` | HTTP 200, 0 bytes |
+| `https://dbaasp.org/api-docs` | HTTP 200, 0 bytes |
+| `https://dbaasp.org/swagger-ui.html` | HTTP 200, 734 bytes (cascara de SPA) |
+| `https://dbaasp.org/export?format=json` | HTTP 200, 0 bytes |
+
+**El sitio esta vivo y el dominio no cambio.** La portada responde y un registro
+de RRID de junio de 2026 sigue listando `https://dbaasp.org` como URL vigente.
+El 403 de la mañana no se reprodujo. Lo que falla es **todo lo que devuelve
+datos**: el patron es uniformemente 200 con cuerpo de 0 bytes, incluida la
+documentacion de la API. Eso descarta el cambio de dominio como explicacion y
+apunta a un backend de datos caido o a una proteccion que exige JavaScript.
+La direccion historica `http://www.biomedicine.org.ge/dbaasp/` (articulo de
+2014) queda como ultimo recurso si la actual dejara de responder.
+
+### El sustituto estaba ya dentro del repositorio
+
+**DRAMP trae MIC en 5 020 de sus 12 784 filas** (39%), en la columna
+`Target_Organism`, como texto libre con organismo, cepa y unidades:
+
+```
+Gram-positive bacteria: Staphylococcus simulans 22 (MIC=0.304 μg/ml),
+Staphylococcus epidermidis 5 (MIC=3.85 μg/ml), Micrococcus luteus
+ATCC4698 (MIC=9.7 μg/ml), ...
+```
+
+Es la via 3 de la lista de arriba, y es claramente la mejor: ese archivo **ya
+se descarga, ya esta en el manifiesto con su `sha256` y ya lo parsea
+`parse_xlsx_source`**, que ademas guarda `Target_Organism` y `Activity` como
+columnas extra. No añade una fuente nueva ni una dependencia de red nueva.
+
+Lo que costaria: un parser de ese texto libre (regex sobre `MIC=`, `MIC≤`,
+rangos, y unificacion de `μg/ml` frente a `µM`, que exige el peso molecular del
+peptido) y decidir como colapsar varios organismos por peptido en un objetivo
+—lo habitual es el MIC contra *E. coli* o *S. aureus*, o la mediana
+geometrica—. No es trivial, pero es trabajo de parseo, no de acceso.
+
+**Otras bases encontradas, por si DRAMP no bastara:** dbAMP 3.0 (NAR 2025,
+33 065 AMPs con anotacion de actividad) responde en
+`https://awi.cuhk.edu.cn/dbAMP/`; hay que localizar su ruta de descarga, porque
+las dos obvias dan 404. APD3 dice en su FAQ que los datos de MIC predichos por
+IA estan pendientes de unificar formato. CAMP R4 es la otra citada en las
+revisiones.
+
+**Decision pendiente de Rodrigo.** La regresion de MIC sigue fuera de alcance
+(D-07) hasta que se decida; lo que cambia es que ya no esta bloqueada por una
+fuente inaccesible, sino por el coste de un parser.
+
 ---
 
 ## P-03 — El prefiltro de k-meros anulaba el umbral de identidad del 40%
@@ -770,6 +826,77 @@ Pero si se cambia `features.moment_window` y se corre solo `interpret` sin
 reentrenar, esos descriptores ya **no** son los que vio el modelo, y nada lo
 detecta. Un hash de la seccion `features` guardado en `results/models/*.json` y
 comparado en `interpret` cerraria el hueco.
+
+---
+
+## P-25 — El editable volvio a romperse, y justo al correr `data` por primera vez
+**Fecha:** 2026-10-11 · **Estado:** RESUELTO (tercera reaparicion de P-13)
+
+**Sintoma:** el primer `make data` de la historia del proyecto murio antes de
+tocar la red:
+
+```
+File ".venv/bin/ampesm", line 4, in <module>
+    from ampesm.cli import main
+ModuleNotFoundError: No module named 'ampesm'
+make: *** [data] Error 1
+```
+
+**Causa:** la misma de P-13. El `.pth` del instalable editable deja de
+procesarse en el entorno. El `pythonpath = ["src"]` de `pyproject.toml` protege
+a `pytest`, pero **no al ejecutable de consola** `ampesm`, que es lo que usa el
+Makefile. Por eso los tests seguian pasando mientras la tuberia estaba muerta:
+las dos rutas de entrada no comparten la salvaguarda.
+
+**Resolucion:** `uv sync --reinstall-package ampesm`.
+
+**Trampa adicional, que es la parte util de esta entrada:** ese comando sin
+`--extra dev` **desinstala las dependencias de desarrollo** (se fueron jupyter,
+pytest y companía en la misma operacion). Hay que volver a sincronizar con
+`uv sync --extra dev`. El orden correcto es:
+
+```bash
+uv sync --reinstall-package ampesm
+uv sync --extra dev
+```
+
+**Leccion:** una salvaguarda que cubre `pytest` y no cubre el punto de entrada
+real es el patron 2 de los tres de abajo (arreglar a medias). Y la señal de
+alarma deberia haber sido que P-13 ya habia reaparecido una vez: un fallo de
+entorno que vuelve dos veces no es mala suerte, es una condicion del entorno
+que hay que detectar explicitamente. `ampesm info` podria empezar comprobando
+su propio import y dando el comando de arreglo.
+
+---
+
+## Que dijo la primera corrida real de `data` (2026-10-11)
+
+No es un problema, es el registro de la unica etapa que nunca se habia
+ejecutado. Los cuatro controles de [14](14-estado-y-continuacion.md) salieron
+en orden:
+
+| Control | Esperado | Obtenido |
+|---|---|---|
+| `parse[apd3].dropped_empty` | exactamente 1 | **1**, cabecera `"Your search led to 3306 peptides"` |
+| `parse[dramp].sequence_column` | la columna correcta | `"Sequence"`, `id_column = "DRAMP_ID"`, 28 columnas |
+| `deduplicate.label_conflicts` | informativo | **271** (~3.4% de los negativos finales) |
+| `length_matching.deficit` | bajo | **23 732**, es decir alto |
+
+Resultado: **18 644 peptidos** (10 594 positivos, 8 050 negativos) en 83 s,
+5.01 MB de red. 6 874 duplicados retirados, esperables por el solapamiento
+DRAMP-APD3.
+
+**El unico control que salio mal es el cuarto, y es informacion, no un bug.**
+Positivos 22.9 residuos de media, negativos 30.6. El deficit de 23 732 dice que
+el emparejado de longitudes **no puede cumplirse** con estas fuentes: no existen
+suficientes negativos cortos revisados en UniProt. La longitud queda como atajo
+disponible para el modelo. Decision tomada al respecto: **D-16**, ablacion
+`comp_physchem_nolen`.
+
+Los 271 conflictos de etiqueta son el otro numero interesante por si mismo:
+secuencias que una base da como AMP confirmado y UniProt no anota. Es una
+estimacion **por lo bajo** de la tasa de falsos negativos entre los negativos, y
+el README ya advertia de que existe; ahora tiene un numero.
 
 ## Plantilla para entradas nuevas
 

@@ -6,8 +6,9 @@ An antimicrobial peptide classifier (AMP vs non-AMP) that compares protein
 language model embeddings (ESM-2) against physicochemical descriptors, using
 sequence-identity cluster splits to prevent data leakage.
 
-> **Status: code complete, not yet run.**
-> The results tables are deliberately empty. They get filled by running the
+> **Status: dataset built, models not yet run.**
+> `make data` has run against the real sources: 18,644 peptides. The results
+> tables are deliberately empty. They get filled by running the rest of the
 > pipeline; the numbers will come from `results/metrics/`, not from an estimate.
 
 ## Why this project
@@ -79,11 +80,12 @@ file's URL, date and `sha256`. `make data` rebuilds the dataset.
 | Source | Role | Records | Size | License |
 |---|---|---|---|---|
 | [APD3](https://aps.unmc.edu/) | Positives | 3,306 | 147 KB | Academic, with citation |
-| [DRAMP 3.0](https://dramp.cpu-bioinfor.org/) | Positives | — | 2.8 MB | Academic, non-commercial |
+| [DRAMP 3.0](https://dramp.cpu-bioinfor.org/) | Positives | 12,784 | 2.8 MB | Academic, non-commercial |
 | [UniProt](https://www.uniprot.org/) KW-0929 | Positives | 1,585 | ~0.2 MB | CC BY 4.0 |
 | UniProt without KW-0929, reviewed | Negatives | 11,982 | ~1.5 MB | CC BY 4.0 |
 
-Sizes and counts measured on 2026-10-11. Total ≈ 5 MB.
+Sizes and counts measured on 2026-10-11. Total ≈ 5 MB. After cleaning, **18,644
+peptides** remain (10,594 positive, 8,050 negative).
 
 Cleaning: standard 20 amino acids only, length 5–50, exact-sequence deduplication
 and length matching. Details in [docs/03-datos-fuentes.md](docs/03-datos-fuentes.md).
@@ -104,7 +106,7 @@ download → cleaning → 40% clusters → ┬→ descriptors ┬→ models → 
 |---|---|
 | **Split** | MMseqs2 at 40% identity (required for publishable results); falls back to CD-HIT, then to a built-in Python clustering so the repo works freshly cloned. Whole clusters to train/val/test (70/15/15), with validation that aborts on degenerate splits. |
 | **Leakage audit** | Maximum identity of every test sequence against **all** of train, compared against a null distribution (the same sequences with residues shuffled). Reported leakage is the **excess over null**, because identity between short peptides has a ~33% background floor. |
-| **Baselines** | Amino acid composition (20 features) and 11 physicochemical descriptors (net charge via Henderson-Hasselbalch, GRAVY, Eisenberg hydrophobic moment, pI, Boman index…) with logistic regression, random forest and XGBoost. |
+| **Baselines** | Amino acid composition (20 features) and 11 physicochemical descriptors (net charge via Henderson-Hasselbalch, GRAVY, Eisenberg hydrophobic moment, pI, Boman index…) with logistic regression, random forest and XGBoost. An **ablation without `length` and `charge_density`** is also trained: the negatives are 7.8 residues longer on average and length matching cannot fix it, so the gap between the full baseline and the ablation measures how much of it was length. |
 | **Embeddings** | ESM-2 8M and 35M, per-residue mean pooling with explicit masking of padding and special tokens, cached on disk. Logistic regression and a small MLP on top. |
 | **Evaluation** | ROC-AUC, PR-AUC, MCC and F1 with 95% CIs from cluster bootstrap. Threshold selected on validation. Paired comparison between the **pre-registered** pair, never between the test winners. |
 | **Interpretation** | UMAP by class, source and split; error analysis by category, source and length. |

@@ -138,6 +138,58 @@ proponen correcciones y las ordenan por prioridad; que se arregla, en que orden 
 que se documenta como limitacion conocida se decide en la conversacion principal,
 con el autor del proyecto.
 
+---
+
+## Sesion 3 — 2026-10-11 · Arreglos y verificacion
+
+### Trabajo en linea
+
+Se aplicaron los 12 hallazgos de la sesion 2 (P-03 a P-13 en
+[09-problemas-encontrados.md](09-problemas-encontrados.md)), se instalaron
+MMseqs2 y libomp, y se verifico la tuberia completa con 623 peptidos
+sinteticos: split con MMseqs2, 9 baselines, embeddings de los dos modelos de
+ESM-2, entrenamiento, evaluacion con la comparacion preregistrada e
+interpretacion con 8 figuras. 114 tests, ruff limpio.
+
+Dos problemas nuevos aparecieron **durante** los arreglos, no en la auditoria:
+
+- **P-12**, el mas instructivo de todo el proyecto: la auditoria de fuga recien
+  escrita dio un 29% que parecia catastrofico y resulto ser ruido de fondo de
+  la metrica. Lo delato que la cola alta del histograma estaba vacia. Se
+  resolvio anadiendo una distribucion nula.
+- **P-13**: los 114 tests fallaron de golpe por un `.pth` del instalable
+  editable que dejo de procesarse. Un fallo del entorno disfrazado de fallo del
+  codigo.
+
+### Agentes de verificacion
+
+Se lanzaron dos agentes en paralelo para comprobar que los arreglos eran
+correctos y suficientes, con el encargo explicito de buscar **problemas nuevos
+introducidos por los arreglos**, que es el riesgo real de una tanda grande de
+cambios:
+
+| Agente | Funcion |
+|---|---|
+| Verificacion metodologica | Medir el prefiltro corregido a varios niveles de identidad; comprobar si el corte temprano por cota superior puede descartar pares validos; validar la distribucion nula con fuga plantada; comprobar que test ya no influye en la seleccion; revisar la tabla de Radzicka y Wolfenden residuo a residuo |
+| Verificacion de robustez | Provocar las ocho guardas una por una; comprobar que XGBoost degrada sin tumbar la etapa; forzar divisiones degeneradas; corrida completa en una copia; medir el rendimiento del clustering con el prefiltro mas laxo |
+
+**Estado al compactar la sesion: ambos agentes seguian corriendo y sus
+informes no llegaron a registrarse aqui.** Si no se revisaron despues, conviene
+relanzarlos antes de publicar resultados. Ver
+[14-estado-y-continuacion.md](14-estado-y-continuacion.md), punto 6.
+
+### Que se aprendio sobre el uso de agentes
+
+Lo de la sesion 2 se confirmo: el patron util es **dar una hipotesis concreta
+que contrastar y permiso para ejecutar**, no "revisa este codigo". Los dos
+hallazgos criticos de la sesion 2 (P-03 y P-05) eran invisibles desde dentro,
+y los encontraron porque midieron y ejecutaron en vez de leer.
+
+Un matiz nuevo: al encargar la verificacion conviene pedir explicitamente que
+digan **que confirman como correcto**, no solo lo que esta mal. Un informe que
+solo lista problemas no permite distinguir "lo revise y esta bien" de "no lo
+revise".
+
 ## Plantilla para sesiones nuevas
 
 ```

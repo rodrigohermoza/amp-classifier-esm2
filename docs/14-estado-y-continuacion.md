@@ -1,6 +1,6 @@
 # Estado del proyecto y como continuar
 
-**Ultima actualizacion: 2026-10-11.** Este archivo es el punto de entrada para
+**Ultima actualizacion: 2026-10-11 (tras la segunda tanda de arreglos).** Este archivo es el punto de entrada para
 retomar el trabajo. Lo que esta hecho, lo que falta y lo que hay que decidir.
 
 ---
@@ -34,16 +34,16 @@ de APD3 (P-01, con test de regresion y aviso si el conteo no es exactamente 1).
 
 | Metrica | Valor |
 |---|---|
-| Commits | 10 |
+| Commits | 12 |
 | Codigo en `src/` | 4 065 lineas, 16 modulos |
-| Tests | 1 146 lineas, **114 casos, todos pasan** |
+| Tests | **117 casos, todos pasan** |
 | Documentacion | 2 110 lineas, 14 archivos |
 | Lint | ruff limpio |
 | Repositorio clonable | ~1 MB |
 | Entorno `.venv` | 1,0 GB |
 | Cache de pesos ESM-2 | 160 MB (`.cache/`, ignorada por git) |
-| Problemas registrados | 13 (P-01 a P-13) |
-| Decisiones registradas | 14 (D-01 a D-14) |
+| Problemas registrados | 18 (P-01 a P-18) |
+| Decisiones registradas | 15 (D-01 a D-15) |
 
 ## Dependencias del sistema ya instaladas
 
@@ -74,8 +74,10 @@ datos reales. Que mirar en `data/processed/clean_report.json`:
 Usara MMseqs2. Que mirar en `data/processed/split_report.json`:
 
 - `publishable` debe ser `true`.
-- `train_test_identity_audit.excess_over_null` cerca de 0. **Ese** es el numero
-  de fuga, no `fraction_over_threshold` (P-12).
+- `train_test_identity_audit.leakage.global_p_value` por encima de 0.05 y
+  `excess` cerca de 0. **Ese** es el numero de fuga. NO leer
+  `fraction_over_threshold` (dara ~30% y es ruido de fondo) ni
+  `excess_over_null_deprecated`. Historia en P-12, P-15 y P-18.
 - `splits.*.length_ks_pvalue`: si es muy bajo en `test`, la longitud sigue
   separando las clases dentro del split y conviene reportar la ablacion sin
   `length` ni `charge_density`.
@@ -98,13 +100,33 @@ inferencia del proyecto. El resto de la tabla es descriptiva.
   que encaje con el resultado**: esta puesta ahi justamente para poder
   contrastarla.
 
-### 6. Verificacion pendiente de cerrar
-Al compactar esta sesion habia **dos agentes de verificacion corriendo** cuyos
-resultados no llegaron a registrarse aqui: uno revisando los arreglos
-metodologicos (prefiltro, auditoria y su nulo, seleccion del par, siembra de
-splits, NaN del bootstrap, escala de Boman) y otro la robustez (las ocho
-guardas, XGBoost, corrida completa, rendimiento del clustering). **Si esos
-informes no se revisaron, conviene relanzarlos antes de publicar.**
+### 6. Verificacion: una hecha, una pendiente
+
+El **agente de verificacion metodologica si llego** y encontro 5 fallos nuevos
+introducidos por los propios arreglos (P-14 a P-18). Ya estan corregidos y
+documentados. Confirmo como correctos: la escala de Boman completa (20 valores
+contra la publicacion, 0 discrepancias), el manejo de NaN en `all_metrics` y
+`bootstrap_metrics`, la coincidencia real entre las etiquetas preregistradas y
+los nombres de archivo que genera `models.py`, que la siembra no rompe el
+invariante de no fuga y da proporciones 70/15/15 exactas, y el cambio de
+Jaccard a contencion.
+
+Quedan sin cerrar dos cosas de su informe, ambas de rigor y no de correccion:
+
+- **La auditoria solo cubre test, no val.** `val` fija los hiperparametros y el
+  umbral, asi que la homologia val-train tambien infla la seleccion. Correr la
+  misma funcion para val cuesta lo mismo.
+- **No se valida la deriva de la tasa positiva entre splits.** Hay un caso
+  medido que pasa todas las comprobaciones actuales con train al 6% de
+  positivos y test al 29%, un cambio de prior de casi 5x. El reporte ya guarda
+  `positive_rate` por split, pero nadie lo mira.
+
+**El agente de verificacion de robustez seguia corriendo al compactar la
+sesion y su informe no se recibio.** Iba a comprobar las ocho guardas una por
+una, la degradacion de XGBoost, divisiones degeneradas, una corrida completa en
+copia, y el rendimiento del clustering con el prefiltro mas laxo (importante:
+bajo de 0.15 a 0.05, lo que hace mas alineamientos, y el ultimo dato medido era
+26 s con 16 000 secuencias **con el prefiltro viejo**). Conviene relanzarlo.
 
 ---
 
@@ -150,12 +172,31 @@ no instale ~60 MB de babel y jedi.
 2. **El respaldo de clustering en Python no sirve para numeros publicables**
    (D-11). Da clusteres distintos de MMseqs2. Mitigado con `publishable: false`
    en el reporte y un aviso ruidoso, pero conviene no olvidarlo.
-3. **El emparejado de longitudes es global, no por split.** El reporte incluye
+3. **El respaldo de clustering agrupa la mitad de los pares a 40-45% de
+   identidad.** Medido de extremo a extremo. Es la razon de D-11; MMseqs2 es
+   obligatorio para publicar. Tabla de recall en docs/04.
+4. **El emparejado de longitudes es global, no por split.** El reporte incluye
    ahora un KS por split para detectarlo, pero si sale mal hay que decidir entre
    emparejar por split o publicar la ablacion sin `length`.
-4. **La etapa `data` nunca se ejecuto.**
+5. **La etapa `data` nunca se ejecuto.**
 
 ---
+
+## Lo que mas conviene recordar de esta sesion
+
+Tres intentos hicieron falta para construir un detector de fuga que detectara
+fuga. Los tres primeros devolvian numeros plausibles y no encontraban nada, ni
+con parientes al 80% de identidad plantados a mano. Ninguno fallaba de forma
+visible.
+
+Y dos de los cinco fallos nuevos los **introdujeron los arreglos anteriores**:
+el corte temprano de la auditoria reintrodujo exactamente el bug que P-03
+acababa de corregir, porque se copio la idea sin volver a comprobar sus
+condiciones.
+
+De ahi D-15 y el habito que vale la pena conservar: **plantar el efecto que
+buscas y exigir que tu herramienta lo encuentre**, antes de creerte el numero
+que te devuelve.
 
 ## Reglas de trabajo acordadas
 

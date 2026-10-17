@@ -53,45 +53,90 @@ la cabecera espuria de APD3 fue exactamente 1, DRAMP encontro la columna
 correcta, 271 conflictos de etiqueta y un `deficit` de emparejado de longitudes
 de **23 732**, que es el numero que motivo D-16.
 
-### Que dijo `split` en sus cuatro corridas (2026-10-17)
+### Que dijo `split` en sus siete corridas (2026-10-17)
 
-Dos de los cuatro controles salieron perfectos y se mantuvieron en las cuatro
+Dos de los cuatro controles salieron perfectos y se mantuvieron en todas las
 corridas: **deriva de tasa positiva 0.000** (las tres divisiones en 0.568, el
 guard de P-26 sin nada que decir) y **MMseqs2 usado** (18-8cc5c). El tercero,
-`publishable`, mentia (P-29) y ahora funciona. El cuarto, la fuga, es la historia
-de la sesion:
+`publishable`, mentia (P-29), luego bloqueaba para siempre, y ahora distingue
+bloqueo de salvedad (D-22). El cuarto, la fuga, es la historia de la sesion.
+
+> **Lee esta tabla con cuidado: las dos mitades NO son comparables, y la mitad
+> de arriba tampoco lo es consigo misma.** Dos cosas la rompen:
+>
+> - en la corrida 5 cambio **que se mide** (P-32: la auditoria empezo a exigir la
+>   misma cobertura que el agrupamiento), y al limpiar el ruido de fondo la
+>   medicion gano potencia, asi que los numeros subieron;
+> - hasta la corrida 7, dos corridas identicas daban **divisiones distintas**
+>   (P-36: el 35% de las secuencias cambiaba de split), asi que parte de la
+>   "tendencia" de las corridas 1 a 6 es ruido de reasignacion, no mejora.
+>
+> Se conserva entera porque el registro de lo que creimos tambien informa, pero
+> **no se puede citar como una progresion**.
 
 | Corrida | Cambio | Clusteres | Exceso test | Exceso val |
 |---|---|---|---|---|
 | 1 | tal cual estaba | 8 173 | +50.2 (p=0) | +47.2 (p=0) |
 | 2 | `--cluster-mode 1` (P-29) | 7 886 | +34.2 (p=0) | +32.2 (p=0) |
 | 3 | fusion por contencion (P-30/D-20) | 7 438 | +20.2 (p=8.7e-05) | +30.2 (p=0) |
-| 4 | arreglado el `break` de P-31 | 7 178 | **+10.2 (p=0.025)** | **+28.2 (p=0)** |
+| 4 | arreglado el `break` de P-31 | 7 178 | +10.2 (p=0.025) | +28.2 (p=0) |
+| | *— aqui cambia lo que se mide (P-32) —* | | | |
+| 5 | la auditoria exige cobertura (P-32/D-21) | 7 153 | +68.2 (p=0) | +62.2 (p=0) |
+| 6 | sin cambios de agrupamiento, solo D-22 | 7 153 | +75.2 (p=0) | +66.2 (p=0) |
+| | *— aqui se arregla la reproducibilidad (P-36) —* | | | |
+| 7 | ids de cluster canonicos (P-36) | 7 153 | **+54.2 (p=0)** | **+65.2 (p=0)** |
 
-El esperado por azar es 23.81 marcadas de 500 en todas las corridas. La corrida 4
-es **anterior** al arreglo de P-31b (union-find sobre clusteres), que esta en el
-codigo y **sin medir**: la proxima corrida dara numeros algo mejores que estos.
+El esperado por azar es 23.81 marcadas de 500 en todas las corridas. **La
+corrida 7 es la division canonica en uso**, y es la primera que otra corrida
+identica reproduciria: las corridas 5 y 6 son el mismo codigo de agrupamiento y
+dan numeros distintos, que es precisamente como se encontro P-36.
 
-Lo que falta por hacer esta diagnosticado y es **P-32**: la auditoria descarta la
-cobertura y el agrupamiento la exige, asi que marca parejas como `CCISG` (cinco
-residuos) contra cualquier peptido rico en cisteina. No estan midiendo lo mismo.
+### Por que la fuga subio al arreglar la medicion, y por que eso es correcto
+
+Es lo mas importante que entender de esta sesion. Durante cuatro corridas la
+auditoria no exigia cobertura, asi que un alineador global con huecos encontraba
+cinco residuos dispersos dentro de casi cualquier peptido y devolvia identidad
+1.000. Ese ruido **tambien contaminaba el nulo**: su p99 era 1.000, es decir las
+barajas tambien saturaban, y la regla de marcado ("la observada supera a sus 20
+barajas") no podia dispararse casi nunca. El `+10.2` de la corrida 4 no era poca
+fuga: era un test **sin potencia**.
+
+Al exigir cobertura, el ruido de fondo bajo de 0.748 a 0.540 y el p99 del nulo de
+1.000 a 0.875, y la fuga real se hizo visible. Se comprobo mirando **que** se
+marca, que es la unica forma de saberlo:
+
+| banda de identidad con su pariente en train | test | val |
+|---|---|---|
+| inequivoca, >= 0.80 | 44% | 56% |
+| alta, 0.60-0.80 | 44% | 30% |
+| dudosa, 0.40-0.60 | 12% | 14% |
+
+`GILDAIKAIAKAAG` vs `GILDPIKAFAKAAG`, `ILGKIWKGIKSLF` vs `ILGKIWKIKKLF`,
+`VQLRIRVRVIRK` vs `VRLRIRVRVIRK`. Eso es homologia, no aritmetica. Entre 19 y 24
+de cada 50 marcadas miden **menos de 15 residuos**, que es donde el prefiltro de
+k-meros de MMseqs2 falla por construccion (P-30).
+
+Conclusion: la fuga no empeoro, estaba tapada. Y el proyecto no la esconde: se
+declara con cada metrica (D-22) y se cuantifica con M-01.
 
 ## Numeros actuales
 
 | Metrica | Valor |
 |---|---|
-| Commits | 29 |
-| Codigo en `src/` | 4 631 lineas, 16 modulos |
-| Tests | **145 casos, todos pasan** (7,4 s) |
-| Documentacion | 5 308 lineas, 18 archivos |
+| Commits | 36 |
+| Codigo en `src/` | 4 892 lineas, 16 modulos |
+| Tests | **162 casos, todos pasan** (5,9 s) |
+| Documentacion | 5 831 lineas, 18 archivos |
 | Datos procesados | 18 644 peptidos (10 594 + / 8 050 -) |
-| Clusteres (ultima corrida) | 7 178 (5 621 de 1), 92 con ambas clases |
+| Clusteres (corrida 7, canonica) | 7 153 (5 615 de 1), 88 con ambas clases |
+| Fuga declarada | test +54.2, val +65.2, ambas p = 0, sobre 23.81 por azar |
 | Lint | ruff limpio |
+| CI | en verde (se cayo dos veces hoy: P-33 y P-34) |
 | Repositorio clonable | ~1 MB |
 | Entorno virtual | 1,0 GB, **en `~/.venvs/ampesm`, fuera de iCloud** (D-19) |
 | Cache de pesos ESM-2 | 160 MB (`.cache/`, ignorada por git) |
-| Problemas registrados | 33 (mas P-10a-h y P-25b/P-31b como subapartados); **2 abiertos: P-23 (a proposito) y P-32 (siguiente tarea)** |
-| Decisiones registradas | 20 (D-01 a D-20) |
+| Problemas registrados | 38 (mas P-10a-h y P-25b/P-31b como subapartados); **1 abierto: P-23, a proposito** |
+| Decisiones registradas | 22 (D-01 a D-22) |
 | Repositorio publico | <https://github.com/rodrigohermoza/amp-classifier-esm2> |
 
 ### Coste medido de cada etapa en el M2 (8 nucleos, 24 GB)
@@ -184,40 +229,50 @@ Quedan **dos problemas abiertos**:
 - **P-32**, que es la siguiente tarea: la auditoria descarta la cobertura que el
   agrupamiento exige, asi que marca parejas que no son homologas.
 
-### 2. `make split` — CORRIDO 4 VECES, aun no limpio (bloqueante)
+### 2. `make split` — HECHO, con la fuga declarada (2026-10-17, corrida 7)
 
-Historia completa de las cuatro corridas en la seccion "Que dijo `split`" de
-arriba, y el detalle en P-29, P-30, P-31 y P-32.
+Historia completa en la seccion "Que dijo `split`" de arriba, y el detalle en
+P-29, P-30, P-31, P-32, P-35 y P-36.
 
-**Estado:** `publishable: false`, con fuga significativa en test (+10.2,
-p = 0.025) y en val (+28.2, p = 0). **Siguiente paso: aplicar P-32** (que la
-auditoria exija el mismo `min_coverage` que el agrupamiento) y volver a correr.
+**Estado: `publishable: true` CON SALVEDADES.** No significa que la division este
+limpia: significa que su defecto esta **medido, acotado y declarado**, y que la
+declaracion viaja pegada a cada numero (D-22). Fuga en test +54.2 (p = 0) y en
+val +65.2 (p = 0), sobre 23.81 marcadas esperadas por azar.
+
+La decision de no seguir ajustando esta tomada y razonada en D-22: la via para
+cerrar el residuo es **M-01**, no mas parametros. La alternativa de fusionar las
+parejas cortas (M-07) queda como analisis de sensibilidad etiquetado, porque
+usaria la misma regla que la auditoria y daria verde por construccion.
 
 Que mirar en `data/processed/split_report.json`:
 
-- `publishable` debe ser `true`. Si es `false`, `publishable_reasons` dice por
-  que, en texto. Ese campo ya tiene en cuenta la fuga (antes no, P-29).
-- `train_test_identity_audit.leakage.global_p_value` por encima de 0.05 y
-  `excess` cerca de 0. **Ese** es el numero de fuga. NO leer
-  `fraction_over_threshold` (dara 100% y es ruido de fondo de la metrica) ni
+- **`publication_blockers` debe estar vacio.** Si tiene algo, no hay nada
+  publicable y `evaluate` **aborta** (D-18): o se uso el respaldo propio en
+  Python, o una auditoria falto o fallo.
+- **`publication_caveats`**: lo que hay que declarar al publicar. Hoy son dos,
+  las dos de fuga. No es una lista de pendientes: es el texto que `evaluate`
+  copia dentro de cada JSON de metricas y en el pie de cada figura.
+- `train_test_identity_audit.leakage.global_p_value` y `excess`. **Ese** es el
+  numero de fuga, y se lee junto a `min_coverage`, que dice con que definicion
+  de homologo se midio (sin eso el p-valor no es interpretable, P-32). NO leer
+  `fraction_over_threshold` (dara ~98% y es ruido de fondo de la metrica) ni
   `excess_over_null_deprecated`. Historia en P-12, P-15 y P-18.
-- `train_val_identity_audit.leakage.global_p_value`: lo mismo para val. Si este
-  sale significativo y el de test no, el umbral se eligio sobre un conjunto
-  optimista y las metricas de test estan sesgadas igualmente (P-27).
-- `contained_merge`: cuantas secuencias eran subcadena de otra y cuantos
-  clusteres se fusionaron por ello (P-30).
-- `positive_rate_drift.exceeds_tolerance` debe ser `false`. En las cuatro
+- `train_val_identity_audit`: lo mismo para val. Sale peor que test y es
+  esperable: a val le toco mas peptido corto.
+- `contained_merge`: 1 582 secuencias eran subcadena de otra, 733 fusiones de
+  clusteres (P-30, D-20).
+- `positive_rate_drift.exceeds_tolerance` debe ser `false`. En las siete
   corridas salio 0.000, perfecto.
-- `splits.*.length_ks_pvalue`: si es muy bajo en `test`, la longitud sigue
-  separando las clases dentro del split y conviene reportar la ablacion sin
-  `length` ni `charge_density`.
-- `mixed_label_clusters`: clusteres con ambas clases. Ultima corrida: 92.
+- `mixed_label_clusters`: clusteres con ambas clases. Corrida 7: 88.
 
-**Si val sigue significativa despues de P-32:** parar de ajustar. El residuo ya
-es homologia real, la respuesta es declararlo en el informe y usar M-01 (curva de
-umbral de identidad) como forma publicable de cerrarlo. Seguir tocando parametros
-hasta que el numero salga bien es el fallo que este repositorio existe para
-evitar, y seria una ironia terminar cometiendolo.
+**Reproducibilidad: resuelta, y conviene no darla por supuesta otra vez.** Hasta
+P-36, dos corridas identicas daban divisiones distintas (el 35% de las
+secuencias cambiaba de split) porque los ids de cluster salian del orden de las
+filas del TSV de MMseqs2, que es multihilo. Si alguna vez un numero de `split`
+se mueve sin que nada haya cambiado, **ese** es el sospechoso; y la forma de
+comprobarlo sin esperar 12 minutos esta en el script de validacion que se uso:
+pasar dos TSV con ordenes distintos por parseo + fusion + asignacion y comparar
+las divisiones.
 
 ### 3. `make baselines`, `make embeddings`, `make train`
 Los pesos de ESM-2 ya estan en cache. Con 18 644 peptidos, los embeddings

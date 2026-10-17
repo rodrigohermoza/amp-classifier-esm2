@@ -94,6 +94,24 @@ def cluster_mmseqs2(
             "7.5",
             "--alignment-mode",
             "3",
+            # --cluster-mode 1 (componente conexa) NO es el valor por defecto, y
+            # el defecto es incorrecto para lo que este proyecto afirma (P-29).
+            #
+            # El modo por defecto resulto ser el 2, incremental voraz: cada
+            # secuencia se asigna al primer representante con el que alinea. Eso
+            # garantiza que todo miembro se parece a SU representante, y no
+            # garantiza nada entre miembros de clusteres distintos. Medido sobre
+            # los datos reales: DLPSGWSSYEGH quedo en train y DCPSDWSPYEGHCYK en
+            # test con 75% de identidad y cobertura 1.00, con ambos tools de
+            # acuerdo en esa cifra. MMseqs2 veia el parecido (valor E 3.5e-08);
+            # el modo de agrupamiento no lo usaba.
+            #
+            # La componente conexa une por transitividad, que es la unica
+            # garantia equivalente a "nada por encima del umbral cruza la
+            # frontera". Coste medido: 8173 -> 7886 clusteres, el mayor pasa de
+            # 379 a 454 secuencias (2.4% del total), sin cadenas degeneradas.
+            "--cluster-mode",
+            "1",
             "-v",
             "1",
         ]
@@ -936,12 +954,20 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             "etiquetas distintas. Probablemente es donde se concentra el ruido de "
             "etiquetado. Ver docs/08-decisiones.md, D-03."
         ),
+        # Valor provisional: solo mira la herramienta. Se recalcula al final de
+        # build_splits, cuando las auditorias ya han corrido, porque un campo
+        # llamado "publishable" que ignora el resultado de la auditoria de fuga
+        # es peor que no tenerlo: en la primera corrida real dijo true con fuga
+        # significativa en test Y en val (P-29).
         "publishable": used_method != "builtin",
         "publishable_note": (
-            "false significa que se uso el respaldo propio en Python, que agrupa "
-            "menos que MMseqs2 y deja fuga residual. No publiques metricas con "
-            "publishable=false. Ver docs/09, P-03."
+            "false significa que no se cumple alguna condicion para publicar "
+            "metricas con esta division: o se uso el respaldo propio en Python, "
+            "que agrupa menos que MMseqs2 (docs/09, P-03), o alguna auditoria "
+            "detecto fuga por homologia significativa (docs/09, P-29). El motivo "
+            "exacto esta en publishable_reasons."
         ),
+        "publishable_reasons": [],
         "cluster_diagnostics": cluster_diagnostics,
         "splits": {},
     }
@@ -1009,6 +1035,11 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             reference_split="train",
         )
 
+    # P-29: `publishable` se decide aqui y no arriba, porque hasta este punto no
+    # se sabe el resultado de las auditorias de fuga.
+    report["publishable_reasons"] = _publishable_reasons(report, used_method)
+    report["publishable"] = not report["publishable_reasons"]
+
     SPLIT_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[split] {report['n_clusters']} clusteres ({report['cluster_size']['singletons']} de 1)")
@@ -1064,7 +1095,9 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
         print(f"[split] AVISO: {drift['note']}")
 
     if not report["publishable"]:
-        print("[split] AVISO: publishable=false (se uso el respaldo propio). Ver docs/09, P-03.")
+        print("[split] AVISO: publishable=false. No publiques metricas con esta division:")
+        for reason in report["publishable_reasons"]:
+            print(f"[split]   - {reason}")
 
     print(f"[split] {SPLITS_PATH}")
     return df
@@ -1128,3 +1161,34 @@ def _positive_rate_drift(splits_report: dict, audit_cfg) -> dict:
             else "dentro de tolerancia"
         ),
     }
+
+
+def _publishable_reasons(report: dict, used_method: str) -> list[str]:
+    """Motivos por los que NO se pueden publicar metricas con esta division.
+
+    Lista vacia = publicable. Se calcula despues de las auditorias a proposito:
+    la version anterior solo miraba la herramienta de clustering y en la primera
+    corrida real declaro `publishable: true` con fuga significativa en test y en
+    val a la vez (P-29). Un campo que se llama "publishable" y no mira el
+    resultado de la auditoria de fuga es peor que no tenerlo, porque invita a
+    saltarse justo la lectura que importa.
+    """
+    reasons: list[str] = []
+    if used_method == "builtin":
+        reasons.append(
+            "se uso el respaldo propio en Python, que agrupa menos que MMseqs2 "
+            "(docs/09, P-03, P-23)"
+        )
+    for key in ("train_test_identity_audit", "train_val_identity_audit"):
+        audit = report.get(key)
+        if not audit or "error" in audit or "leakage" not in audit:
+            continue
+        leak = audit["leakage"]
+        if leak.get("significant"):
+            reasons.append(
+                f"fuga por homologia significativa en "
+                f"{audit['query_split']}-vs-{audit['reference_split']} "
+                f"(exceso {leak['excess']:+.1f} sobre {leak['n_expected_by_chance']} "
+                f"esperadas por azar, p = {leak['global_p_value']:.3g})"
+            )
+    return reasons

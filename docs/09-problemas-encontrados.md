@@ -1128,6 +1128,118 @@ el entorno va fuera.
 
 ---
 
+## P-29 — El modo de agrupamiento por defecto no da la garantia que el proyecto declara
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO en parte; el resto es P-30
+
+**Sintoma:** primera corrida real de `split`. Deriva de prevalencia perfecta
+(0.000, las tres divisiones en 0.568) y **fuga significativa en test Y en val**:
+74 y 71 marcadas de 500 contra 23.81 esperadas por azar, p = 0 en ambas.
+
+**Causa:** la llamada a MMseqs2 no pasaba `--cluster-mode`, y el valor por
+defecto resulto ser el **2, incremental voraz**: cada secuencia se asigna al
+primer representante con el que alinea. La garantia de ese modo es "todo miembro
+se parece a SU representante" y **no dice nada entre miembros de clusteres
+distintos**. Es decir: la garantia que el proyecto afirma —nada por encima del
+40% cruza la frontera— no se deducia del metodo usado.
+
+Caso medido: `DLPSGWSSYEGH` en train y `DCPSDWSPYEGHCYK` en test, **75% de
+identidad**, cobertura 1.00, con el alineador del proyecto y MMseqs2 de acuerdo
+en la cifra. Preguntado directamente, MMseqs2 reporta la alineacion con valor E
+de 3.5e-08: veia el parecido perfectamente, el modo de agrupamiento no lo usaba.
+
+| `--cluster-mode` | Clusteres | Esa pareja |
+|---|---|---|
+| sin especificar (= 2) | 8 173 | separada |
+| 0, set-cover | 8 033 | junta |
+| 1, componente conexa | 7 886 | junta |
+
+**Resolucion:** `--cluster-mode 1` explicito. Coste: el cluster mayor pasa de
+379 a 454 secuencias (2.4% del total), sin cadenas degeneradas, asi que la
+division 70/15/15 sigue siendo posible.
+
+**Resultado medido tras el cambio:** la fuga **baja un tercio y no desaparece**.
+Exceso de marcadas 50.2 -> 34.2 en test y 47.2 -> 32.2 en val, p = 0 todavia.
+El resto del problema esta en P-30 y es de otra naturaleza.
+
+**Segundo hallazgo, de diseno: `publishable` mentia.** Salio **true** con fuga
+significativa en los dos lados, porque el campo solo miraba que herramienta de
+clustering se habia usado. Un indicador que se llama "publishable" y no mira el
+resultado de la auditoria de fuga es peor que no tenerlo: invita a saltarse justo
+la lectura que importa. Ahora se calcula **despues** de las auditorias
+(`_publishable_reasons`) y enumera los motivos. Con la division actual dice false
+y explica por que, que es lo que tenia que haber dicho desde el principio.
+
+**Leccion:** el valor por defecto de una herramienta no es una decision del
+proyecto, pero se comporta como si lo fuera. Aqui el defecto elegia la semantica
+del agrupamiento, que es **la** decision metodologica central del repositorio, y
+estaba sin escribir en ninguna parte. Todo parametro del que dependa una
+afirmacion del README se pasa explicito aunque coincida con el defecto.
+
+---
+
+## P-30 — El 8.5% del conjunto son fragmentos de otras secuencias, y MMseqs2 no puede verlos
+**Fecha:** 2026-10-17 · **Estado:** ABIERTO, medido, con dos arreglos candidatos
+
+**Sintoma:** con `--cluster-mode 1` ya puesto, la auditoria sigue marcando fuga
+significativa (exceso +34.2 en test, +32.2 en val).
+
+**Diagnostico:** se midio la identidad maxima de las 50 secuencias marcadas
+contra train. **No es parentesco sutil por debajo del umbral**, que era la
+hipotesis razonable: la mediana es **0.917** y 36 de 50 pasan de 0.90. Las ocho
+peores:
+
+```
+PFKLSLHL          vs  TPFKLSLHL                           (un residuo delante)
+KKKKVVAATYVLF     vs  KKKKVVAATYVLFA                      (un residuo detras)
+SKHSSLDCVLRP      vs  SLDCVLRP                            (subcadena)
+LFYLVPGPGH        vs  QLLIRMIYKNILFYLVPGPGHGAEPERRNIKYL   (subcadena)
+NVWKKILGKIIKVVK   vs  ILGKIIKVVK                          (subcadena)
+AEAMSQVTNTATIM    vs  AEASQVTNTATIM                       (una delecion interna)
+FFPIVGKLLSGLL     vs  FFPIVGKLLSGLSGLL                    (insercion)
+```
+
+Son **fragmentos y casi-duplicados**: el peptido maduro dentro de su precursor,
+o el mismo registro con los bordes cortados de otra forma en DRAMP y APD3. El
+deduplicado es exacto (`seq_sha1`), asi que estos sobreviven enteros.
+
+Medido sobre el conjunto completo: **1 582 de 18 644 secuencias (8.5%) son
+subcadena exacta de otra mas larga.** 1 541 con la misma etiqueta y **41 con
+etiqueta distinta** —estos ultimos son conflicto de etiquetado ademas de
+redundancia, y se suman a los 271 ya conocidos de otra forma.
+
+**Causa de que el agrupamiento no los una:** no es configuracion. Se probaron
+seis combinaciones de `-c` y `--cov-mode`, incluida cobertura 0: ninguna une mas
+de 1 de esas 8 parejas. Preguntando a MMseqs2 pareja por pareja con todo
+permisivo, **solo encuentra 3 de 8**, y falla en `PFKLSLHL` vs `TPFKLSLHL`, que
+son el mismo peptido con una letra delante. El motivo es estructural: su
+prefiltro necesita coincidencias de k-meros con k en torno a 6-7, y un peptido de
+8 residuos tiene dos o tres k-meros; desplazar una letra los destruye. **MMseqs2
+esta disenado para proteinas.** A 8-15 residuos no hay configuracion que lo
+arregle.
+
+**Los dos arreglos candidatos, con su coste medido:**
+
+1. **Fusionar por contencion** antes o despues de MMseqs2: si una secuencia es
+   subcadena de otra, al mismo cluster. Deteccion con indice de 4-meros, **unos
+   segundos**. Alcanza a la mayoria de los 1 582 y no pierde ni un dato.
+2. **Pasada de fusion por pares con el alineador del proyecto**, union-find sobre
+   todo par con identidad >= 0.40. Coste medido: 40 ms por consulta contra 13 050
+   sujetos, es decir **~12 min** para 18 644 en un nucleo.
+
+**La tension que hay que decidir, y es la parte interesante:** ahora mismo el
+agrupamiento mide con MMseqs2 y la auditoria mide con Biopython. **Son dos reglas
+distintas**, y por eso la auditoria encuentra violaciones que el agrupamiento
+nunca evaluo. La opcion 2 las iguala y, por construccion, la auditoria dejaria de
+marcar fuga.
+
+Eso suena a solucion y es en parte una trampa: **una guarda que usa la misma
+regla que lo que vigila no puede detectar los puntos ciegos de esa regla.** Se
+cambiaria un problema visible por uno invisible. La opcion 1 no tiene ese
+defecto, porque la contencion de subcadenas es un criterio exacto y
+independiente de cualquier alineador.
+
+---
+
 ## Plantilla para entradas nuevas
 
 ```

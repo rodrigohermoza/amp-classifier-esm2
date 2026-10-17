@@ -49,13 +49,35 @@ reproducibilidad.
 ### 1. MMseqs2 (preferido)
 
 ```
-mmseqs easy-cluster entrada.fasta prefijo tmp --min-seq-id 0.4 -c 0.5 --cov-mode 1
+mmseqs easy-cluster entrada.fasta prefijo tmp --min-seq-id 0.4 -c 0.5 --cov-mode 1 \
+    -s 7.5 --alignment-mode 3 --cluster-mode 1
 ```
 
 Rapido y es el estandar actual. Se instala con `brew install mmseqs2`
 (~30 MB). `-c 0.5 --cov-mode 1` exige que el alineamiento cubra al menos la
 mitad de la secuencia mas corta, lo que importa cuando se mezclan peptidos de 5 y
 de 50 residuos.
+
+**`--cluster-mode 1` es obligatorio y no es el valor por defecto** (P-29). Los
+tres modos dan garantias distintas, y solo una sirve aqui:
+
+| Modo | Garantiza | Sirve para dividir? |
+|---|---|---|
+| 2, incremental voraz (**el defecto**) | cada miembro se parece a **su** representante | **No** |
+| 0, set-cover | idem, con otra heuristica de eleccion | No |
+| 1, componente conexa | si dos secuencias se parecen, estan en el mismo grupo, por transitividad | **Si** |
+
+La diferencia no es academica. Con el modo por defecto, dos miembros de
+clusteres distintos pueden parecerse entre si todo lo que quieran mientras
+ninguno sea representante del otro, y eso es exactamente fuga. Medido sobre los
+datos reales: `DLPSGWSSYEGH` quedo en train y `DCPSDWSPYEGHCYK` en test con
+**75% de identidad** y cobertura 1.00. MMseqs2 veia el parecido perfectamente
+(valor E 3.5e-08 al preguntarselo directamente); el modo de agrupamiento no lo
+usaba.
+
+Coste de cambiar al modo 1 sobre los 18 644 peptidos: 8 173 -> 7 886 clusteres,
+el mayor pasa de 379 a 454 secuencias (2.4% del total). No aparecen cadenas
+degeneradas, asi que la division 70/15/15 sigue siendo posible.
 
 ### 2. CD-HIT
 

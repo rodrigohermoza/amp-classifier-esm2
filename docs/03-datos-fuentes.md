@@ -27,6 +27,24 @@ Los conteos de UniProt vienen de la cabecera `x-total-results` de la API,
 consultada el 2026-10-11. Pueden variar en releases posteriores; el manifiesto
 guarda el conteo real de cada corrida.
 
+### De donde sale la ventana de longitud 5-50
+
+El limite superior no se eligio en este proyecto: se hereda del de 2023, donde
+se observo que **por encima de 50 residuos dejan de aparecer AMPs anotados en
+cantidad apreciable**. El corte por tanto no sacrifica apenas senal, y a cambio
+evita el problema de mezclar proteinas completas con peptidos en un mismo
+problema: cambiaria la escala de todos los descriptores y el coste de ESM-2.
+
+Es un criterio del dominio, no estadistico, y conviene que quede escrito porque
+no se deduce del codigo. El limite inferior de 5 es distinto: esta puesto para
+que la identidad de secuencia siga significando algo (ver
+[09](09-problemas-encontrados.md), P-10c: con secuencias de 3 residuos, un
+peptido identico a un fragmento de otro aparece como homologo sin serlo).
+
+El proyecto de 2023 aplicaba la misma ventana (3-50 en su caso) y **solo** esa:
+`filter_database.py` filtraba por longitud y nada mas. Esa diferencia es el
+origen de la mitad de este repositorio.
+
 ### Lo que quedo despues de limpiar (corrida real del 2026-10-11)
 
 | Paso | Registros |

@@ -14,9 +14,11 @@ import pytest
 
 from ampesm.split import (
     _positive_rate_drift,
+    _publishable_reasons,
     assign_splits,
     audit_train_test_identity,
     cluster_builtin,
+    cluster_mmseqs2,
     kmer_set,
 )
 
@@ -508,3 +510,103 @@ class TestPositiveRateDrift:
         drift = _positive_rate_drift(splits, {"positive_rate_tolerance": 0.05})
         assert "val" not in drift["rates"], "un split vacio tiene tasa 0.0 y falsearia la deriva"
         assert not drift["exceeds_tolerance"]
+
+
+class TestPublishableTieneEnCuentaLaFuga:
+    """P-29: `publishable` salio true con fuga significativa en test Y en val.
+
+    El campo solo miraba la herramienta de clustering. Un indicador que se llama
+    "publishable" y no mira el resultado de la auditoria invita a saltarse justo
+    la lectura que importa.
+    """
+
+    @staticmethod
+    def _audit(query, significant):
+        return {
+            "query_split": query,
+            "reference_split": "train",
+            "leakage": {
+                "significant": significant,
+                "excess": 50.19,
+                "n_expected_by_chance": 23.81,
+                "global_p_value": 0.0,
+            },
+        }
+
+    def test_fuga_en_test_lo_vuelve_no_publicable(self):
+        report = {"train_test_identity_audit": self._audit("test", True)}
+        reasons = _publishable_reasons(report, "mmseqs2")
+        assert len(reasons) == 1
+        assert "test-vs-train" in reasons[0]
+
+    def test_fuga_solo_en_val_tambien_lo_vuelve_no_publicable(self):
+        # val fija el umbral que se aplica a test, asi que la fuga val-train
+        # sesga las metricas de test aunque test este limpio (P-27).
+        report = {
+            "train_test_identity_audit": self._audit("test", False),
+            "train_val_identity_audit": self._audit("val", True),
+        }
+        reasons = _publishable_reasons(report, "mmseqs2")
+        assert len(reasons) == 1
+        assert "val-vs-train" in reasons[0]
+
+    def test_el_caso_real_de_la_primera_corrida_acumula_los_dos_motivos(self):
+        report = {
+            "train_test_identity_audit": self._audit("test", True),
+            "train_val_identity_audit": self._audit("val", True),
+        }
+        reasons = _publishable_reasons(report, "mmseqs2")
+        assert len(reasons) == 2
+
+    def test_sin_fuga_y_con_mmseqs2_es_publicable(self):
+        report = {
+            "train_test_identity_audit": self._audit("test", False),
+            "train_val_identity_audit": self._audit("val", False),
+        }
+        assert _publishable_reasons(report, "mmseqs2") == []
+
+    def test_el_respaldo_propio_sigue_contando_como_motivo(self):
+        report = {"train_test_identity_audit": self._audit("test", False)}
+        reasons = _publishable_reasons(report, "builtin")
+        assert len(reasons) == 1
+        assert "respaldo propio" in reasons[0]
+
+    def test_una_auditoria_con_error_no_se_toma_por_limpia(self):
+        # Que la auditoria no haya podido correr no es evidencia de ausencia de
+        # fuga, pero tampoco se puede afirmar que la haya: no aporta motivo.
+        report = {"train_test_identity_audit": {"error": "falta el split test"}}
+        assert _publishable_reasons(report, "mmseqs2") == []
+
+
+class TestClusterModeExplicito:
+    """P-29: el modo por defecto de MMseqs2 no da la garantia que el proyecto
+    declara.
+
+    El defecto resulto ser el 2 (incremental voraz), que garantiza que cada
+    miembro se parece a SU representante y nada entre miembros de clusteres
+    distintos. Sobre los datos reales dejo DLPSGWSSYEGH en train y
+    DCPSDWSPYEGHCYK en test con 75% de identidad.
+
+    Este test fija la decision: es una comprobacion de la orden construida, no
+    del comportamiento de MMseqs2, que no se puede exigir en CI sin instalarlo.
+    """
+
+    def test_la_orden_pide_componente_conexa(self, monkeypatch, tmp_path):
+        capturado = {}
+
+        def falso_run(cmd, *args, **kwargs):
+            capturado["cmd"] = cmd
+            raise RuntimeError("corta aqui: solo interesa la orden construida")
+
+        monkeypatch.setattr("ampesm.split.subprocess.run", falso_run)
+        sequences = {"a": "ACDEFGHIKL", "b": "ACDEFGHIKM"}
+        with pytest.raises(RuntimeError):
+            cluster_mmseqs2(sequences, identity=0.4, coverage=0.5)
+
+        cmd = capturado["cmd"]
+        assert "easy-cluster" in cmd, "se capturo otra orden, no la del agrupamiento"
+        assert "--cluster-mode" in cmd, (
+            "sin --cluster-mode explicito se usa el defecto, que no garantiza "
+            "que nada por encima del umbral cruce la frontera (P-29)"
+        )
+        assert cmd[cmd.index("--cluster-mode") + 1] == "1"

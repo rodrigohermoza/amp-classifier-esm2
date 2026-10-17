@@ -4,6 +4,11 @@
 seed: 42
 
 data:
+  # La ventana 5-50 no es arbitraria ni se eligio aqui: viene del proyecto de
+  # 2023, donde se comprobo que por encima de 50 residuos ya no aparecen
+  # cantidades apreciables de AMPs anotados, asi que el corte no pierde apenas
+  # senal y evita arrastrar proteinas completas a un problema de peptidos.
+  # Ver docs/03-datos-fuentes.md.
   min_length: 5
   max_length: 50
   # Si se emparejan las longitudes de los negativos con la distribucion de los

@@ -504,7 +504,9 @@ sido un error vergonzoso y perfectamente evitable.
 ---
 
 ## P-13 — Los 114 tests fallaron de golpe por el entorno, no por el codigo
-**Fecha:** 2026-10-11 · **Estado:** RESUELTO
+**Fecha:** 2026-10-11 · **Estado:** CERRADO por **P-28**, que identifico la causa
+real. Reaparecio cinco veces (P-25, P-25b) mientras se trato como un fallo
+intermitente del instalable editable.
 
 **Sintoma:** a mitad de la sesion, los tests pasaron de pasar todos a fallar
 todos en la coleccion con `ModuleNotFoundError: No module named 'ampesm'`.
@@ -844,7 +846,7 @@ peor que no comprobarlo.
 ---
 
 ## P-25 — El editable volvio a romperse, y justo al correr `data` por primera vez
-**Fecha:** 2026-10-11 · **Estado:** RESUELTO, con guarda (tercera reaparicion de P-13)
+**Fecha:** 2026-10-11 · **Estado:** CERRADO por [P-28](#p-28--icloud-estaba-destruyendo-el-entorno-virtual-y-era-la-causa-de-p-13-y-p-25), que identifico la causa real (tercera de cinco reapariciones de P-13)
 
 **Sintoma:** el primer `make data` de la historia del proyecto murio antes de
 tocar la red:
@@ -1014,6 +1016,117 @@ No estaba planeado, pero es exactamente lo que pide D-15: la guarda se probo
 contra el caso positivo real y no solo contra un caso construido. Vale
 anotarlo porque la tentacion al escribir una guarda para un fallo intermitente
 es darla por buena sin verla disparar.
+
+## P-28 — iCloud estaba destruyendo el entorno virtual, y era la causa de P-13 y P-25
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO con guarda · **cierra P-13 y P-25**
+
+**Sintoma:** al retomar el proyecto, `make check-env` fallo con el
+`ModuleNotFoundError` de siempre. **Quinta** aparicion del mismo fallo. Esta vez,
+en lugar de reinstalar y seguir, se fue a buscar la causa. Al mirar el entorno:
+
+```
+.venv/lib/python3.12/site-packages/pytest/
+  __init__ 2.py
+  __init__ 3.py     <- __init__.py, el que Python busca, no existe
+  __main__ 2.py
+```
+
+**Causa:** el proyecto vive en `~/Desktop`, **iCloud sincroniza esa carpeta**, y
+ante un conflicto iCloud no fusiona: conserva las dos copias y renombra una
+anadiendole ` 2`. Para un documento es una molestia menor. Para un entorno de
+Python es letal, porque Python localiza sus modulos **por nombre exacto de
+archivo**: con `__init__.py` renombrado, el paquete existe en disco y no existe
+para el interprete. Nada se borra; todo se vuelve invisible.
+
+Medido en el entorno corrupto:
+
+| | |
+|---|---|
+| Archivos renombrados dentro de `.venv` | **4 785** |
+| Renombrados fuera de `.venv` (codigo, docs, `.git`) | **0** |
+| Directorios duplicados enteros | `lib 2`, `share 2` |
+| Copias del `.pth` del instalable editable | **4** |
+
+Ese `.pth` es el archivo cuyo unico contenido es "el codigo de este proyecto
+esta en `src/`". Renombrado, el comando `ampesm` muere con
+`ModuleNotFoundError`. Reinstalar devolvia el nombre bueno; iCloud lo volvia a
+tocar dias despues. **Cinco veces.** "El `.pth` deja de procesarse de vez en
+cuando", que es lo que decia P-25, no era una causa: era una descripcion del
+sintoma con tono de explicacion.
+
+**Segundo efecto, mas grave porque era silencioso:** `.venv/bin/pytest` tambien
+quedo renombrado. `uv run pytest` no encontro el ejecutable en el entorno, **no
+dio error**, y cayo al siguiente `pytest` del sistema — el de anaconda, pytest
+7.1.2 sobre **Python 3.10** en vez del 3.12 del proyecto:
+
+```
+EXE   /Users/rodrigohermoza/anaconda3/bin/python
+BIO FAIL  No module named 'Bio'
+```
+
+Durante un tiempo indeterminado, `make test` estuvo midiendo otro interprete con
+otras versiones. Los tres fallos que delataron el problema
+(`TestValAudit`) fallaban solo porque ese entorno no tiene Biopython. Verificado
+despues en el entorno correcto: **129 tests pasan en 7.4 s**, asi que la cifra
+era buena; lo que no era bueno es que no se sabia que se estaba midiendo. CI en
+GitHub Actions, que construye el entorno desde cero en un runner limpio, es lo
+que salvo la situacion.
+
+**Resolucion:**
+
+1. El entorno virtual se saca del arbol sincronizado:
+   `UV_PROJECT_ENVIRONMENT = ~/.venvs/ampesm`, exportado desde el **Makefile**.
+2. `.venv` dentro del proyecto pasa a ser un **enlace simbolico** a esa ruta.
+   Sin esto el arreglo tenia un hueco: `uv run` escrito a mano, sin pasar por
+   `make`, recreaba un `.venv` real dentro del proyecto (paso de verdad, al
+   verificar). uv respeta el enlace y resuelve fuera de iCloud.
+3. `make check-env` distingue ahora las dos causas: cuenta los archivos
+   renombrados en el entorno y, si hay, da el arreglo de P-28 en lugar del de
+   P-25.
+4. Aviso aparte si `.venv` vuelve a ser un directorio real dentro del proyecto.
+   Funciona hoy y se corrompera manana, asi que avisa y no aborta (**D-18**).
+
+El entorno viejo no se borro hasta que el nuevo paso los 129 tests.
+
+**Las dos ramas de la guarda, validadas (D-15), y el intento que fallo:** el
+primer caso plantado fue renombrar el `.pth` a mano. **La guarda no salto**, y no
+porque estuviera mal: `uv run` repara el instalable editable por su cuenta antes
+de ejecutar. Es decir, el caso plantado no reproducia el fallo real, donde uv
+daba el entorno por bueno porque los metadatos (`dist-info`) estaban intactos y
+solo los archivos estaban renombrados. La validacion que si vale se hizo
+apuntando la guarda al `.venv` autenticamente mutilado antes de borrarlo:
+
+```
+Error: el paquete 'ampesm' no se importa en este entorno (P-25).
+Causa: 4789 archivos renombrados por sincronizacion en la nube (P-28).
+```
+
+Merece quedar escrito porque es el modo en que D-15 falla: **un caso plantado
+que no reproduce el mecanismo real da un verde falso**, y es facil darlo por
+bueno porque la guarda "no salta" tanto si el codigo esta bien como si el caso
+esta mal construido.
+
+**Una inferencia propia que resulto falsa, por si reaparece el numero:** se
+observo que 0 de 13 848 archivos del entorno compartian espacio con la cache de
+uv y se concluyo que iCloud habia roto los enlaces duros, prometiendo recuperar
+823 MB al mover el entorno. Es falso: en macOS con APFS uv usa `clone`
+(copia-al-escribir) y no enlaces duros, asi que los archivos comparten bloques
+en disco **sin** aparecer como enlaces multiples. El entorno nuevo y sano
+muestra el mismo "1 enlace". El numero era real y la lectura estaba inventada.
+
+**Leccion:** un fallo de entorno que reaparece **cinco veces** sin causa
+identificada no esta documentado, esta anotado. El patron 3 de la lista de abajo
+—confundir sintoma con causa— se pago aqui en cinco reinstalaciones y en un
+suite de tests que informaba verde sobre otro interprete. La pregunta que habria
+cortado esto en la primera reaparicion es la mas barata de todas: **¿que mas hay
+en esta carpeta que pueda estar escribiendo en ella aparte de mi?**
+
+Corolario practico para proyectos futuros: un entorno virtual, una carpeta
+`node_modules` o cualquier arbol de miles de archivos pequenos no debe vivir
+dentro de Dropbox, OneDrive ni iCloud Drive. Si el proyecto tiene que estar ahi,
+el entorno va fuera.
+
+---
 
 ## Plantilla para entradas nuevas
 

@@ -168,6 +168,12 @@ make setup
 make all
 ```
 
+> The virtual environment is created at `~/.venvs/ampesm`, with `.venv` as a
+> symlink to it. This is deliberate: on the development machine the project sits
+> in an iCloud-synced folder, which renamed files inside the environment and left
+> it unusable ([P-28](docs/09-problemas-encontrados.md), [D-19](docs/08-decisiones.md)).
+> The path is a `?=`, so export `UV_PROJECT_ENVIRONMENT` to change it.
+
 Stage by stage:
 
 ```bash

@@ -177,6 +177,12 @@ make setup
 make all
 ```
 
+> El entorno virtual se crea en `~/.venvs/ampesm` y `.venv` queda como un enlace
+> a esa ruta. No es capricho: en la maquina de desarrollo el proyecto vive en una
+> carpeta sincronizada por iCloud, que renombraba archivos dentro del entorno y
+> lo dejaba inservible ([P-28](docs/09-problemas-encontrados.md), [D-19](docs/08-decisiones.md)).
+> La ruta es un `?=`: exporta `UV_PROJECT_ENVIRONMENT` para cambiarla.
+
 Etapa por etapa:
 
 ```bash

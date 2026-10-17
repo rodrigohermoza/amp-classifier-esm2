@@ -365,3 +365,44 @@ de `features` **aborta** `interpret`, y la deriva de tasa positiva solo
 **Consecuencia asumida:** abortar es mas molesto. Se acepta porque el coste de
 una figura equivocada publicada es mayor que el de una etapa que hay que
 relanzar.
+
+---
+
+## D-19 — El entorno virtual vive fuera del proyecto
+
+**Contexto:** el proyecto esta en `~/Desktop`, que iCloud sincroniza. Un entorno
+virtual son ~14 000 archivos pequenos que Python localiza por nombre exacto, y
+iCloud resuelve los conflictos renombrando copias a `nombre 2.py`. El resultado
+es un entorno intacto en disco e invisible para el interprete. Destruyo el
+entorno cinco veces antes de identificarse (**P-28**).
+
+**Opciones:**
+
+1. Seguir reinstalando cuando falle. Es lo que se hizo cinco veces. Coste: unos
+   minutos cada vez, mas el riesgo real de que un fallo silencioso —el `pytest`
+   de anaconda respondiendo en lugar del del proyecto— pase por verde.
+2. Mover el proyecto entero fuera de iCloud. Arregla la clase completa de
+   problemas, incluido el riesgo de que algun dia iCloud toque algo fuera de
+   `.venv`. Cuesta cambiar la ruta de trabajo y romper la organizacion de
+   carpetas del autor.
+3. Dejar el proyecto donde esta y mover **solo** el entorno, con `.venv` como
+   enlace simbolico para que `uv run` a secas tambien resuelva fuera.
+
+**Decision: la 3.** El entorno es la unica parte del arbol que es desechable por
+diseno —se reconstruye entera desde `uv.lock` en segundos— y es la unica que
+sufre el problema: se midio que los archivos renombrados dentro de `.venv` eran
+4 785 y fuera de `.venv` eran **0**. Mover lo desechable y dejar quieto lo
+valioso es la intervencion mas pequena que cierra el fallo.
+
+**Lo que esta decision acepta:** que el riesgo residual no es cero. Si iCloud
+algun dia renombra algo en `src/` o en `.git`, esta decision no protege de nada;
+contra eso solo vale la opcion 2. Se asume porque hoy ese dano no se ha
+producido y porque el repositorio remoto es la copia de seguridad real.
+
+**Lo que impone al que clone el repo:** `UV_PROJECT_ENVIRONMENT` apunta por
+defecto a `~/.venvs/ampesm` y `.venv` es un enlace. Es un `?=`, asi que
+cualquiera puede sobreescribirlo; en un sistema sin sincronizacion en la nube la
+decision es irrelevante y no molesta.
+
+**Relacionado:** P-28, P-13, P-25, D-15 (el caso plantado que no reproducia el
+mecanismo real), D-18 (el aviso de `.venv` real avisa y no aborta).

@@ -7,9 +7,8 @@ Por ser proyecto personal, va en `organizacion: personal` (sección aparte al
 final de `/proyectos`) y usa `historiaCorta` de 3 pasos: Antes → Lo que hice →
 Ahora, con el título de cada paso como gancho.
 
-**Pendiente:** los huecos marcados `[PENDIENTE]` se rellenan cuando la tubería
-corra. La guía dice no inventar datos, así que se quedan vacíos hasta entonces.
-No publicar con los huecos puestos.
+**Estado (2026-10-17):** la tubería corrió y los huecos estan rellenos con los
+numeros reales. Listo para publicar.
 
 ---
 
@@ -86,7 +85,11 @@ de errores se desglosan por fuente.
 
 ## Paso 3 — «Un filtro, no un oráculo»
 
-**simple.** [PENDIENTE: resultado en una frase, sin siglas, cuando haya números.]
+**simple.** El resultado honesto es que **el modelo grande no gana**: acierta
+igual que medir carga e hidrofobicidad con una tabla de toda la vida, y la
+diferencia entre los dos es tan pequena que no se distingue del azar. Eso no es
+un fracaso del proyecto, es su resultado: ahora hay un numero donde antes habia
+una suposicion.
 El programa no decide: ordena una lista para que quien tenga el laboratorio
 empiece por arriba. Y sirve igual cuando se equivoca: los fragmentos que marca
 como buenos sin estar en las listas conocidas son justo los que nadie ha probado
@@ -94,9 +97,15 @@ todavía, y esos son candidatos interesantes por sí mismos. Todo está publicad
 con las cuentas a la vista, incluidos los errores que cometí por el camino, para
 que cualquiera pueda repetirlo o contradecirme.
 
-**tecnico.** [PENDIENTE: MCC y ROC-AUC en test con IC 95%, y el resultado de la
-comparación emparejada ESM-2 frente a baseline — si la diferencia es
-distinguible de cero o no.] El repositorio es reproducible con un comando, con
+**tecnico.** En prueba, ESM-2 35M + logistica da MCC 0,645 [0,543-0,727] y
+ROC-AUC 0,895 [0,838-0,940]; el baseline preregistrado (composicion +
+fisicoquimicos con XGBoost) da MCC 0,637 [0,540-0,716] y ROC-AUC 0,909
+[0,865-0,943]. La **comparacion emparejada** del par preregistrado da una
+diferencia de MCC de **+0,008 con IC 95% [-0,033, +0,051]**: incluye el cero, los
+modelos no se distinguen. Los intervalos son por bootstrap de **clusteres
+completos**, no de secuencias. La division lleva fuga por homologia **medida y
+declarada** (exceso +54,2 en test y +65,2 en val sobre 23,81 esperadas por azar),
+escrita dentro de cada JSON de metricas y en el pie de cada figura. El repositorio es reproducible con un comando, con
 dependencias de versión fija, datos reconstruibles desde la fuente (no
 redistribuidos, por licencia) y el mapeo secuencia→clúster→split versionado como
 artefacto. La documentación incluye registro de decisiones, bitácora de errores
@@ -148,7 +157,7 @@ humo" de la guía.
 - [x] Tono sin soberbia; se dice que el algoritmo genético era del equipo y que
       mi aporte de 2023 fueron los datos
 - [x] Nada confidencial; el repositorio del equipo es académico y público
-- [ ] Ningún dato inventado → **falta rellenar los `[PENDIENTE]`**
+- [x] Ningún dato inventado → los `[PENDIENTE]` se rellenaron con la corrida del 2026-10-17
 - [ ] Animación nueva de 3 escenas y miniatura nueva
 - [ ] `npm run build` sin errores
 - [ ] Actualizar `05-animaciones.md`, `06-decisiones.md` y `07-pendientes.md`

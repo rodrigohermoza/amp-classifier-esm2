@@ -7,10 +7,11 @@ de un modelo de lenguaje de proteínas (ESM-2) contra descriptores
 fisicoquímicos, con división de datos por clústeres de identidad de secuencia y
 **la fuga residual medida y declarada** en lugar de dada por eliminada.
 
-> **Estado: datos construidos, modelos pendientes de ejecución.**
-> `make data` ya corrió contra las fuentes reales: 18 644 péptidos. Las tablas
-> de resultados están vacías a propósito. Se rellenan corriendo el resto de la
-> tubería, y los números saldrán de `results/metrics/`, no de una estimación.
+> **Estado: tubería completa corrida (2026-10-17).** 18 644 péptidos, 16 modelos
+> evaluados, todas las cifras de este README salen de `results/metrics/`.
+> El resultado principal es un empate: la diferencia entre ESM-2 y el baseline
+> fisicoquímico no se distingue del cero. La división lleva fuga por homología
+> **medida y declarada**, no eliminada.
 
 ## Por qué este proyecto
 
@@ -144,12 +145,71 @@ Boman de LL-37 da 3,0 (publicado 2,9–3,0).
 
 ## Resultados
 
-Pendientes de ejecución.
+Corrida del 2026-10-17 sobre la división canónica. **Toda métrica de esta tabla
+se lee junto a la fuga declarada arriba**, que va escrita dentro de cada JSON de
+métricas y en el pie de cada figura.
+
+### La comparación preregistrada, que es la única inferencia del proyecto
 
 | Modelo | ROC-AUC | PR-AUC | MCC | F1 |
 |---|---|---|---|---|
-| Composición + fisicoquímicos, XGBoost | — | — | — | — |
-| ESM-2 35M + logística | — | — | — | — |
+| Composición + fisicoquímicos, XGBoost | 0,909 [0,865–0,943] | 0,931 | 0,637 [0,540–0,716] | 0,827 |
+| ESM-2 35M + logística | 0,895 [0,838–0,940] | 0,909 | 0,645 [0,543–0,727] | 0,841 |
+
+**Diferencia de MCC: +0,008, IC 95% [−0,033, +0,051]. El intervalo incluye el
+cero: los dos modelos no se distinguen.**
+
+Esto es exactamente lo que el compromiso previo de abajo decía esperar, y algo
+más conservador todavía: no es que los embeddings ganen por poco, es que con
+estos datos y esta división **no se puede afirmar que ganen**. Un modelo de
+lenguaje de proteínas de 35 millones de parámetros empata con 31 números que se
+calculan con una tabla de aminoácidos.
+
+No se reescribe el titular para que suene mejor. Si el proyecto solo publicara
+la fila que más conviene, no serviría para nada de lo que dice servir.
+
+### Todos los modelos, como tabla descriptiva
+
+Ordenados por MCC. **No son inferencia**: elegir el mejor de 16 en prueba y
+presentar su diferencia sería el error que la comparación preregistrada existe
+para evitar (P-05).
+
+| Modelo | ROC-AUC | MCC | F1 |
+|---|---|---|---|
+| ESM-2 35M + MLP | 0,913 [0,862–0,950] | 0,659 | 0,852 |
+| ESM-2 35M + logística | 0,895 [0,838–0,940] | 0,645 | 0,841 |
+| comp+fisicoquímicos, XGBoost | 0,909 [0,865–0,943] | 0,637 | 0,827 |
+| comp+fisicoquímicos, random forest | 0,903 [0,852–0,940] | 0,634 | 0,848 |
+| ESM-2 8M + logística | 0,902 [0,860–0,934] | 0,631 | 0,839 |
+| comp+fisicoq. sin longitud, XGBoost | 0,907 [0,862–0,941] | 0,626 | 0,818 |
+| comp+fisicoq. sin longitud, random forest | 0,901 [0,850–0,938] | 0,620 | 0,846 |
+| ESM-2 8M + MLP | 0,891 [0,824–0,938] | 0,614 | 0,837 |
+| composición, random forest | 0,891 [0,845–0,926] | 0,598 | 0,835 |
+| composición, XGBoost | 0,872 [0,819–0,913] | 0,594 | 0,835 |
+| fisicoquímicos, random forest | 0,873 [0,819–0,916] | 0,559 | 0,801 |
+| fisicoquímicos, XGBoost | 0,870 [0,817–0,914] | 0,534 | 0,816 |
+| comp+fisicoquímicos, logística | 0,821 [0,749–0,877] | 0,481 | 0,786 |
+| comp+fisicoq. sin longitud, logística | 0,795 [0,733–0,846] | 0,452 | 0,741 |
+| composición, logística | 0,779 [0,720–0,829] | 0,424 | 0,666 |
+| fisicoquímicos, logística | 0,755 [0,661–0,838] | 0,377 | 0,567 |
+
+### Tres cosas que esta tabla dice y conviene no pasar por alto
+
+**El baseline no era débil.** 0,909 de ROC-AUC con 31 descriptores
+fisicoquímicos. La advertencia escrita en `docs/01` —que esos números son
+difíciles de superar porque la actividad antimicrobiana depende sobre todo de
+carga y hidrofobicidad— se cumplió.
+
+**La longitud no era el truco.** La ablación `sin longitud` (D-16) baja el MCC
+de 0,637 a 0,626, dentro del ruido. El baseline no ganaba midiendo cuán largo
+es el péptido, así que la comparación contra ESM-2 es más limpia de lo que la
+asimetría de esa ablación hacía temer. Esto sustituye por un número una
+advertencia que hasta ahora estaba solo escrita.
+
+**Los intervalos son anchos, y eso es honesto, no un defecto.** El bootstrap
+remuestrea **clústeres completos**, no secuencias. Con secuencias daría
+intervalos mucho más estrechos y falsos, porque las secuencias de un clúster son
+parientes y no son observaciones independientes.
 
 ### Compromiso previo
 

@@ -7,10 +7,11 @@ language model embeddings (ESM-2) against physicochemical descriptors, using
 sequence-identity cluster splits with the **residual leakage measured and
 declared** rather than assumed away.
 
-> **Status: dataset built, models not yet run.**
-> `make data` has run against the real sources: 18,644 peptides. The results
-> tables are deliberately empty. They get filled by running the rest of the
-> pipeline; the numbers will come from `results/metrics/`, not from an estimate.
+> **Status: full pipeline run (2026-10-17).** 18,644 peptides, 16 models
+> evaluated, every figure in this README comes from `results/metrics/`.
+> The headline result is a tie: the difference between ESM-2 and the
+> physicochemical baseline is indistinguishable from zero. The split carries
+> homology leakage that is **measured and declared**, not eliminated.
 
 ## Why this project
 
@@ -139,12 +140,69 @@ pH 7.4 (published +3 to +4) and LL-37 gives +5.9 (published +6).
 
 ## Results
 
-Pending execution.
+Run of 2026-10-17 on the canonical split. **Every metric here is read alongside
+the declared leakage above**, which is written inside every metrics JSON and in
+the footer of every figure.
+
+### The pre-registered comparison, the only inference in the project
 
 | Model | ROC-AUC | PR-AUC | MCC | F1 |
 |---|---|---|---|---|
-| Composition + physicochemical, XGBoost | — | — | — | — |
-| ESM-2 35M + logistic regression | — | — | — | — |
+| Composition + physicochemical, XGBoost | 0.909 [0.865–0.943] | 0.931 | 0.637 [0.540–0.716] | 0.827 |
+| ESM-2 35M + logistic regression | 0.895 [0.838–0.940] | 0.909 | 0.645 [0.543–0.727] | 0.841 |
+
+**MCC difference: +0.008, 95% CI [−0.033, +0.051]. The interval includes zero:
+the two models are indistinguishable.**
+
+This is exactly what the pre-registration below said to expect, and in fact more
+conservative: it is not that embeddings win by a little, it is that with this
+data and this split **they cannot be shown to win at all**. A 35-million
+parameter protein language model ties with 31 numbers computed from an amino
+acid table.
+
+The headline is not rewritten to sound better. A project that published only the
+row that suited it would be useless for everything it claims to be for.
+
+### All models, as a descriptive table
+
+Sorted by MCC. **Not inference**: picking the best of 16 on test and reporting
+its difference is the error the pre-registered comparison exists to prevent.
+
+| Model | ROC-AUC | MCC | F1 |
+|---|---|---|---|
+| ESM-2 35M + MLP | 0.913 [0.862–0.950] | 0.659 | 0.852 |
+| ESM-2 35M + logistic | 0.895 [0.838–0.940] | 0.645 | 0.841 |
+| comp+physchem, XGBoost | 0.909 [0.865–0.943] | 0.637 | 0.827 |
+| comp+physchem, random forest | 0.903 [0.852–0.940] | 0.634 | 0.848 |
+| ESM-2 8M + logistic | 0.902 [0.860–0.934] | 0.631 | 0.839 |
+| comp+physchem without length, XGBoost | 0.907 [0.862–0.941] | 0.626 | 0.818 |
+| comp+physchem without length, random forest | 0.901 [0.850–0.938] | 0.620 | 0.846 |
+| ESM-2 8M + MLP | 0.891 [0.824–0.938] | 0.614 | 0.837 |
+| composition, random forest | 0.891 [0.845–0.926] | 0.598 | 0.835 |
+| composition, XGBoost | 0.872 [0.819–0.913] | 0.594 | 0.835 |
+| physicochemical, random forest | 0.873 [0.819–0.916] | 0.559 | 0.801 |
+| physicochemical, XGBoost | 0.870 [0.817–0.914] | 0.534 | 0.816 |
+| comp+physchem, logistic | 0.821 [0.749–0.877] | 0.481 | 0.786 |
+| comp+physchem without length, logistic | 0.795 [0.733–0.846] | 0.452 | 0.741 |
+| composition, logistic | 0.779 [0.720–0.829] | 0.424 | 0.666 |
+| physicochemical, logistic | 0.755 [0.661–0.838] | 0.377 | 0.567 |
+
+### Three things this table says that are worth not skipping
+
+**The baseline was not weak.** 0.909 ROC-AUC from 31 physicochemical
+descriptors. The warning written in `docs/01` — that these numbers are hard to
+beat because antimicrobial activity depends mostly on charge and
+hydrophobicity — held.
+
+**Length was not the trick.** The `without length` ablation drops MCC from 0.637
+to 0.626, within noise. The baseline was not winning by measuring how long the
+peptide is, so the comparison against ESM-2 is cleaner than that ablation's
+asymmetry suggested. This replaces a written warning with a number.
+
+**The intervals are wide, and that is honest, not a defect.** The bootstrap
+resamples **whole clusters**, not sequences. Resampling sequences would give
+much narrower and false intervals, because sequences in a cluster are relatives
+and not independent observations.
 
 ### Pre-registration
 

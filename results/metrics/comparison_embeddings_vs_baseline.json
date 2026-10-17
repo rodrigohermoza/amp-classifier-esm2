@@ -1,0 +1,18 @@
+{
+  "metric": "mcc",
+  "difference": 0.008142146033957243,
+  "ci_low": -0.033231337793111056,
+  "ci_high": 0.05091172564342402,
+  "n_boot_valid": 2000,
+  "n_boot_requested": 2000,
+  "significant": false,
+  "interpretation": "El intervalo incluye el cero: los modelos no se distinguen.",
+  "model_a": "facebook_esm2_t12_35M_UR50D__logreg",
+  "model_b": "comp_physchem__xgboost",
+  "selected_on": "preregistro (docs/07)",
+  "split_caveats": [
+    "fuga por homologia significativa en test-vs-train: exceso +54.2 sobre 23.81 marcadas esperadas por azar (p = 0). Se concentra en peptidos cortos, donde el prefiltro de k-meros de MMseqs2 falla por construccion (docs/09, P-30, P-32). Toda metrica de esta division se lee junto a la curva de umbral de identidad (M-01).",
+    "fuga por homologia significativa en val-vs-train: exceso +65.2 sobre 23.81 marcadas esperadas por azar (p = 0). Se concentra en peptidos cortos, donde el prefiltro de k-meros de MMseqs2 falla por construccion (docs/09, P-30, P-32). Toda metrica de esta division se lee junto a la curva de umbral de identidad (M-01)."
+  ],
+  "selection_note": "Los dos modelos comparados se eligieron SIN mirar test. La tabla summary.csv con los 13 modelos es descriptiva; la unica inferencia del proyecto es esta comparacion emparejada. Ver docs/09, P-05."
+}

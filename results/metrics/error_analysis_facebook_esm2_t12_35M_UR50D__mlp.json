@@ -1,0 +1,304 @@
+{
+  "model": "facebook_esm2_t12_35M_UR50D__mlp",
+  "threshold": 0.5172566573936969,
+  "n_test": 2797,
+  "by_category": {
+    "falso_negativo": {
+      "n": 242,
+      "net_charge": 0.544,
+      "gravy": -0.247,
+      "hydrophobic_moment": 0.432,
+      "length": 24.413,
+      "aromaticity": 0.11
+    },
+    "falso_positivo": {
+      "n": 227,
+      "net_charge": 2.027,
+      "gravy": -0.273,
+      "hydrophobic_moment": 0.462,
+      "length": 29.63,
+      "aromaticity": 0.09
+    },
+    "verdadero_negativo": {
+      "n": 981,
+      "net_charge": 0.358,
+      "gravy": 0.148,
+      "hydrophobic_moment": 0.418,
+      "length": 31.699,
+      "aromaticity": 0.108
+    },
+    "verdadero_positivo": {
+      "n": 1347,
+      "net_charge": 2.847,
+      "gravy": 0.019,
+      "hydrophobic_moment": 0.532,
+      "length": 24.122,
+      "aromaticity": 0.096
+    }
+  },
+  "by_source": {
+    "apd3": {
+      "n": 594,
+      "accuracy": 0.8721,
+      "label": 1
+    },
+    "dramp": {
+      "n": 929,
+      "accuracy": 0.8428,
+      "label": 1
+    },
+    "uniprot_amp": {
+      "n": 66,
+      "accuracy": 0.697,
+      "label": 1
+    },
+    "uniprot_neg": {
+      "n": 1208,
+      "accuracy": 0.8121,
+      "label": 0
+    }
+  },
+  "by_source_note": "Si la exactitud en uniprot_amp es mucho peor que en apd3, el modelo depende de la procedencia y no de la actividad. Ver docs/01-objetivos.md.",
+  "by_length": {
+    "[4, 10)": {
+      "n": 188,
+      "accuracy": 0.8085
+    },
+    "[10, 20)": {
+      "n": 783,
+      "accuracy": 0.834
+    },
+    "[20, 30)": {
+      "n": 544,
+      "accuracy": 0.8327
+    },
+    "[30, 40)": {
+      "n": 772,
+      "accuracy": 0.8394
+    },
+    "[40, 50)": {
+      "n": 473,
+      "accuracy": 0.8161
+    },
+    "[50, 51)": {
+      "n": 37,
+      "accuracy": 0.973
+    }
+  },
+  "top_false_positives": [
+    {
+      "id": "uniprot_neg:P17231",
+      "sequence": "FLPILGKILGGLL",
+      "score": 0.9999919,
+      "net_charge": 0.940066759994089,
+      "length": 13.0
+    },
+    {
+      "id": "uniprot_neg:P0DQL1",
+      "sequence": "GVVDILKGAAKDLAGHLATKVMDKL",
+      "score": 0.999977,
+      "net_charge": 0.9766643695253755,
+      "length": 25.0
+    },
+    {
+      "id": "uniprot_neg:P38639",
+      "sequence": "WIGRW",
+      "score": 0.99991715,
+      "net_charge": 0.9407992035330661,
+      "length": 5.0
+    },
+    {
+      "id": "uniprot_neg:C0HK49",
+      "sequence": "KDCKRESNTFPGICITKPPCRKACIREKFTDGHCSKILRRCLCTKPC",
+      "score": 0.99988604,
+      "net_charge": 6.8369441403706475,
+      "length": 47.0
+    },
+    {
+      "id": "uniprot_neg:P0C1F4",
+      "sequence": "GASCRCDSDGPTSRGNTLTGTLWLIGRCPSGWHNCRGSGPFIGYCCKQ",
+      "score": 0.999841,
+      "net_charge": 2.122522096613939,
+      "length": 48.0
+    },
+    {
+      "id": "uniprot_neg:P82803",
+      "sequence": "GVACRCDSDGPTVRGNSLSGTLWLTGGCPSGWHNCRGSGPFIGYCCKK",
+      "score": 0.99980146,
+      "net_charge": 2.1217896530749623,
+      "length": 48.0
+    },
+    {
+      "id": "uniprot_neg:Q7M425",
+      "sequence": "GVACRCDSDGPTSRGNTLTGTLWLTGGCPSGWHNCRGSGPFIGYCCKK",
+      "score": 0.99979585,
+      "net_charge": 2.1217896530749623,
+      "length": 48.0
+    },
+    {
+      "id": "uniprot_neg:B3EWX1",
+      "sequence": "FLNPFRWMINKYREWKNKKN",
+      "score": 0.9997112,
+      "net_charge": 4.936401885527099,
+      "length": 20.0
+    },
+    {
+      "id": "uniprot_neg:P0C5F6",
+      "sequence": "GVPCLCDSDGPSVRGNTLSGTLWLFGCPSGWHNCKARGPTIGWCCKK",
+      "score": 0.9997073,
+      "net_charge": 2.123190610495115,
+      "length": 47.0
+    },
+    {
+      "id": "uniprot_neg:P13722",
+      "sequence": "KAWFVLSMRAVGGLFVDLWTSVAKTVKGWL",
+      "score": 0.9995808,
+      "net_charge": 2.938754716534399,
+      "length": 30.0
+    },
+    {
+      "id": "uniprot_neg:B3EWX2",
+      "sequence": "LNPFRWMINKYREWKNKKN",
+      "score": 0.9995536,
+      "net_charge": 4.936401885527099,
+      "length": 19.0
+    },
+    {
+      "id": "uniprot_neg:B3EWX0",
+      "sequence": "LNPFRWVINKYREWKNKKDS",
+      "score": 0.9995004,
+      "net_charge": 3.936579681850948,
+      "length": 20.0
+    },
+    {
+      "id": "uniprot_neg:B3EWW9",
+      "sequence": "FLNPFRWVINKYREWKNKKDS",
+      "score": 0.99948406,
+      "net_charge": 3.936579681850948,
+      "length": 21.0
+    },
+    {
+      "id": "uniprot_neg:P0C5F7",
+      "sequence": "GVPCLCDSDGPSVRGNTLSGTLWLFGCPSGWHNCKAHGPTIGWCCKK",
+      "score": 0.99946207,
+      "net_charge": 1.161485431945898,
+      "length": 47.0
+    },
+    {
+      "id": "uniprot_neg:P0DTR3",
+      "sequence": "CLCNSDGPSVRGNTLSGILWLAGCPSGWHNCKKHKPTIGWCCK",
+      "score": 0.9994485,
+      "net_charge": 3.1605668745145428,
+      "length": 43.0
+    }
+  ],
+  "top_false_positives_note": "Candidatos a negativos mal etiquetados. Si son cationicos y secretados, es probable que sean AMPs no anotados, y entonces la precision real es mejor que la medida.",
+  "top_false_negatives": [
+    {
+      "id": "apd3:AP02896",
+      "sequence": "MSDNKPDISDVTSFDKTKLKKTETQEKNTLPTKEIEQEKSESS",
+      "score": 2.3193368e-06,
+      "net_charge": -2.0601627127527746,
+      "length": 43.0
+    },
+    {
+      "id": "dramp:DRAMP37945",
+      "sequence": "MSTNPKPQRKTKRNTNRR",
+      "score": 6.093745e-06,
+      "net_charge": 6.9385519675049645,
+      "length": 18.0
+    },
+    {
+      "id": "apd3:AP03287",
+      "sequence": "MSQNTHKGMTGHRRPVNQKNGAEKRAKTQAVLDFLRSRDTKESK",
+      "score": 8.034213e-06,
+      "net_charge": 7.014664856929555,
+      "length": 44.0
+    },
+    {
+      "id": "apd3:AP02361",
+      "sequence": "MITISTMLQFGLFLIALIGLVIKLIELSNKK",
+      "score": 1.210107e-05,
+      "net_charge": 1.9392926827307906,
+      "length": 31.0
+    },
+    {
+      "id": "apd3:AP02017",
+      "sequence": "GKVKVGVNGFGRIGRLVTRAAFNSGKVDIVA",
+      "score": 0.0008572592,
+      "net_charge": 4.938738081397342,
+      "length": 31.0
+    },
+    {
+      "id": "dramp:DRAMP03365",
+      "sequence": "DINFPICRFCCQCCNKPSCGICCEE",
+      "score": 0.0034192933,
+      "net_charge": -2.1970423229163103,
+      "length": 25.0
+    },
+    {
+      "id": "apd3:AP02360",
+      "sequence": "MVALLKSLERRRLMITISTMLQFGLFLIALIGLVIKLIELSNKK",
+      "score": 0.0034336578,
+      "net_charge": 4.939234413869413,
+      "length": 44.0
+    },
+    {
+      "id": "dramp:DRAMP18144",
+      "sequence": "YCQKWMWTCDAERKCCEDMACELWCKKRL",
+      "score": 0.0038194004,
+      "net_charge": 0.0841522794013635,
+      "length": 29.0
+    },
+    {
+      "id": "uniprot_amp:A0ABM5NH95",
+      "sequence": "MNGSSKILNALIEITKRYEGLKLTAYRDPGGIWTIGYGHSGSC",
+      "score": 0.0041742306,
+      "net_charge": 1.8297109084280183,
+      "length": 43.0
+    },
+    {
+      "id": "uniprot_amp:A0A3D9B500",
+      "sequence": "MKTSQKGINLILSFEGFSSKPYLDSAGIPTIGYGNTYYPGG",
+      "score": 0.008540082,
+      "net_charge": 0.9309368752181205,
+      "length": 41.0
+    },
+    {
+      "id": "apd3:AP02012",
+      "sequence": "VKVGINGFGRIGRLVTRAAFHGKKVEVVAIND",
+      "score": 0.009870992,
+      "net_charge": 3.9777320302313095,
+      "length": 32.0
+    },
+    {
+      "id": "apd3:AP00192",
+      "sequence": "ICIFCCGCCHRSKCGMCCKT",
+      "score": 0.010888941,
+      "net_charge": 1.8389107336311634,
+      "length": 20.0
+    },
+    {
+      "id": "dramp:DRAMP04571",
+      "sequence": "IIKVPLKKFKSMREVMRDHGIKAPVVDPATKY",
+      "score": 0.011747213,
+      "net_charge": 4.973562459842042,
+      "length": 32.0
+    },
+    {
+      "id": "dramp:DRAMP18099",
+      "sequence": "ECAAKNKRCADWAGPWCCEGLYCSCRSYPGCMCRPNS",
+      "score": 0.013289135,
+      "net_charge": 0.7979334789208674,
+      "length": 37.0
+    },
+    {
+      "id": "uniprot_amp:Q25090",
+      "sequence": "MNYVIFVVLVALYVIDVAKCTVPSDCLSCICEVEGCDKEIGRCGDDAG",
+      "score": 0.013564267,
+      "net_charge": -5.915957892802678,
+      "length": 48.0
+    }
+  ],
+  "top_false_negatives_note": "Si son anionicos o ricos en prolina, son familias de AMPs que no siguen el mecanismo cationico-anfipatico dominante, y el fallo es explicable."
+}

@@ -1,0 +1,74 @@
+{
+  "model": "facebook_esm2_t6_8M_UR50D__mlp",
+  "split": "test",
+  "threshold": 0.3999627075637819,
+  "threshold_selected_on": "val",
+  "threshold_metric": "mcc",
+  "val_mcc": 0.6260957040365052,
+  "metrics": {
+    "roc_auc": {
+      "point": 0.8912736674738163,
+      "ci_low": 0.8237539326144211,
+      "ci_high": 0.9381239943032729,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    },
+    "pr_auc": {
+      "point": 0.9120590386838155,
+      "ci_low": 0.8430646934299454,
+      "ci_high": 0.957353002586737,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    },
+    "mcc": {
+      "point": 0.6135316371949505,
+      "ci_low": 0.47813018895934034,
+      "ci_high": 0.7138129985981474,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    },
+    "f1": {
+      "point": 0.837137569401604,
+      "ci_low": 0.7672885419199728,
+      "ci_high": 0.8883848276686472,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    },
+    "sensitivity": {
+      "point": 0.8539962240402769,
+      "ci_low": 0.8029758043295322,
+      "ci_high": 0.8937590487859169,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    },
+    "specificity": {
+      "point": 0.7549668874172185,
+      "ci_low": 0.625881845841785,
+      "ci_high": 0.8593290429721578,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    },
+    "precision": {
+      "point": 0.8209316394434362,
+      "ci_low": 0.7174675256936207,
+      "ci_high": 0.9025089619833803,
+      "n_boot_valid": 2000,
+      "n_boot_requested": 2000
+    }
+  },
+  "confusion_matrix": {
+    "tn": 912,
+    "fp": 296,
+    "fn": 232,
+    "tp": 1357
+  },
+  "n_test": 2797,
+  "n_clusters_test": 1026,
+  "bootstrap_n": 2000,
+  "bootstrap_unit": "cluster",
+  "ci": 0.95,
+  "split_caveats": [
+    "fuga por homologia significativa en test-vs-train: exceso +54.2 sobre 23.81 marcadas esperadas por azar (p = 0). Se concentra en peptidos cortos, donde el prefiltro de k-meros de MMseqs2 falla por construccion (docs/09, P-30, P-32). Toda metrica de esta division se lee junto a la curva de umbral de identidad (M-01).",
+    "fuga por homologia significativa en val-vs-train: exceso +65.2 sobre 23.81 marcadas esperadas por azar (p = 0). Se concentra en peptidos cortos, donde el prefiltro de k-meros de MMseqs2 falla por construccion (docs/09, P-30, P-32). Toda metrica de esta division se lee junto a la curva de umbral de identidad (M-01)."
+  ]
+}

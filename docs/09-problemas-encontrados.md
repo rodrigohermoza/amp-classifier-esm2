@@ -1638,6 +1638,24 @@ eso incluye la tabla de evolucion de la fuga de `docs/14`: parte de esa
 representante **ordenado alfabeticamente**. Es funcion aparte para poder fijarla
 con un test sin MMseqs2 instalado, que es la leccion de P-34.
 
+**Comprobado de punta a punta despues de arreglarlo**, que es lo que convierte la
+afirmacion en un hecho. Se guardaron los artefactos de la corrida buena, se
+relanzo `split` + `baselines` + `train` + `evaluate` enteros y se comparo:
+
+```
+splits.csv                              identico byte a byte
+comparison_embeddings_vs_baseline.json  identico byte a byte
+summary.csv                             una sola diferencia: 1.11e-16 en un umbral
+```
+
+Esa diferencia es el ultimo bit de un flotante de doble precision, ruido de
+redondeo por el orden de una suma. **Todas las metricas coinciden a 12 decimales
+y la inferencia principal es identica bit a bit.**
+
+La corrida tardo 20 min en vez de 12, y no por el arreglo: el proceso estaba al
+99% de CPU compitiendo con el dibujado de pantalla y la app de Claude, con carga
+media 3.4. Conviene no confundir "mas lento" con "distinto".
+
 **Leccion.** Es la tercera vez en este repositorio que el defecto no esta en el
 calculo sino en el **orden**: P-14 (un `break` que dependia de una cota mal
 puesta), P-31 (orden de iteracion de un `set`) y esta. El patron comun es tratar

@@ -1,7 +1,7 @@
 {
   "model": "comp_physchem_nolen__random_forest",
   "split": "test",
-  "threshold": 0.3818426224564407,
+  "threshold": 0.38184262245644063,
   "threshold_selected_on": "val",
   "threshold_metric": "mcc",
   "val_mcc": 0.5933171658631629,

@@ -59,10 +59,22 @@ def cluster_mmseqs2(
 ) -> dict[str, int] | None:
     """Agrupa con MMseqs2. Devuelve id -> cluster, o None si no esta instalado.
 
-    --cov-mode 1 mide la cobertura respecto a la secuencia mas corta, que es lo
-    que interesa al mezclar peptidos de 5 y de 50 residuos: con el modo por
-    defecto, un peptido corto nunca alcanzaria la cobertura exigida frente a uno
-    largo y quedaria en su propio cluster, perdiendo la agrupacion.
+    `--cov-mode 1` mide la cobertura respecto al **objetivo**, que en el
+    agrupamiento es el representante, es decir la secuencia larga. Esta frase
+    decia antes lo contrario ("respecto a la mas corta") y afirmaba que por eso
+    un peptido corto se agrupa con uno largo. Es falso, y medido (P-35):
+
+        larga            GIPCGESCVWIPCISGAIGCSCKSKVCYRN   30 residuos
+        corta_subcadena  IPCISGAIGC                       subcadena exacta
+        -> con -c 0.5 --cov-mode 1 quedan en clusteres DISTINTOS
+
+    Es decir, la definicion efectiva de homologo de este agrupamiento es
+    identidad >= `identity` **y** alineamiento que cubra >= `coverage` de la
+    secuencia larga. Las subcadenas cortas no las agrupa, y de ahi vino P-30:
+    las tapa aparte la fusion por contencion de D-20, no este modo de cobertura.
+
+    La auditoria de fuga exige la misma definicion, por eso le pasa el mismo
+    `min_coverage` (P-32).
     """
     if shutil.which("mmseqs") is None:
         return None
@@ -272,6 +284,35 @@ def identity_and_coverage(seq_a: str, seq_b: str, aligner) -> tuple[float, float
         matches += sum(1 for i in range(block) if seq_a[a_start + i] == seq_b[b_start + i])
 
     return matches / shorter, aligned_cols / shorter
+
+
+def identity_and_coverages(seq_a: str, seq_b: str, aligner) -> tuple[float, float, float]:
+    """Identidad, cobertura sobre la corta y cobertura sobre la larga.
+
+    Las dos coberturas existen porque el proyecto necesita las dos definiciones
+    y confundirlas fue P-32:
+
+    - sobre la **corta**, la que usa `cluster_builtin`: no castiga al peptido
+      corto contenido en uno largo, que es el caso que al agrupar interesa unir;
+    - sobre la **larga**, la que usa MMseqs2 con `--cov-mode 1` y por tanto la
+      que define que parejas el agrupamiento se comprometio a separar. Es la que
+      debe exigir la auditoria de fuga.
+
+    Que la diferencia no es cosmetica, medido sobre las parejas reales que
+    marcaba la auditoria:
+
+        30 vs 5  (CCISG)   identidad 1.000  /corta 1.000  /larga 0.167
+        29 vs 29 homologas identidad 1.000  /corta 1.000  /larga 1.000
+
+    Exigir 0.5 a la cobertura sobre la corta no habria quitado ni uno de los
+    falsos positivos, que era el arreglo que P-32 tenia escrito.
+    """
+    ident, cov_shorter = identity_and_coverage(seq_a, seq_b, aligner)
+    shorter = min(len(seq_a), len(seq_b))
+    longer = max(len(seq_a), len(seq_b))
+    if longer == 0:
+        return ident, cov_shorter, 0.0
+    return ident, cov_shorter, cov_shorter * shorter / longer
 
 
 def cluster_builtin(
@@ -505,8 +546,23 @@ def _max_identity_against(
     aligner,
     kmer_size: int,
     prefilter: float,
+    *,
+    min_coverage: float,
 ) -> list[tuple[float, int | None]]:
-    """Para cada consulta, su identidad maxima contra el conjunto sujeto."""
+    """Para cada consulta, su identidad maxima contra el conjunto sujeto.
+
+    Una pareja solo cuenta si pasa identidad **y** cobertura, con la misma
+    definicion de cobertura que exige el agrupamiento (P-32): sobre la secuencia
+    larga, que es lo que mide MMseqs2 con `--cov-mode 1`. Sin esto la auditoria
+    marcaba parejas que el agrupamiento nunca tuvo la obligacion de separar,
+    como `CCISG` (cinco residuos) contra cualquier peptido rico en cisteina, con
+    identidad 1.000 por aritmetica y cobertura 0.167 sobre la larga.
+
+    `min_coverage` no tiene valor por defecto a proposito. Es el parametro del
+    que depende el significado del p-valor de fuga, y P-29 ya enseno que un
+    defecto se comporta como una decision del proyecto aunque nadie la haya
+    tomado: quien llame a esta funcion declara que definicion de homologo audita.
+    """
     out: list[tuple[float, int | None]] = []
     for query in queries:
         kmers = kmer_set(query, kmer_size)
@@ -529,7 +585,23 @@ def _max_identity_against(
             denom = min(n_kmers, len(subject_kmers[idx]))
             if denom == 0 or (n_shared / denom) < prefilter:
                 continue
-            ident, _cov = identity_and_coverage(subject_seqs[idx], query, aligner)
+            ident, _cov_corta, cov_larga = identity_and_coverages(subject_seqs[idx], query, aligner)
+            # La condicion es una O, y los dos terminos vigilan garantias
+            # distintas (P-32):
+            #
+            # - cobertura sobre la larga: la garantia de MMseqs2 con
+            #   `-c --cov-mode 1`, es decir que parejas el agrupamiento se
+            #   comprometio a separar;
+            # - contencion exacta: la garantia de D-20, la fusion por
+            #   contencion. Si se auditara solo por cobertura, una subcadena
+            #   corta en un split distinto (8 residuos dentro de 50 da cobertura
+            #   0.16) dejaria de marcarse, y la auditoria quedaria ciega
+            #   justamente ante el mecanismo mas joven y el que ya fallo dos
+            #   veces (P-31, P-31b). La guarda tiene que ver las dos cosas.
+            otra = subject_seqs[idx]
+            contenida = otra in query or query in otra
+            if cov_larga < min_coverage and not contenida:
+                continue
             if ident > best_identity:
                 best_identity = ident
                 best_partner = idx
@@ -540,6 +612,7 @@ def _max_identity_against(
 def audit_train_test_identity(
     df: pd.DataFrame,
     threshold: float,
+    min_coverage: float,
     kmer_size: int = 3,
     prefilter: float = 0.05,
     max_test: int | None = None,
@@ -611,7 +684,14 @@ def audit_train_test_identity(
 
     test_seqs = query_rows.sequence.tolist()
     results = _max_identity_against(
-        test_seqs, subject_seqs, subject_kmers, kmer_index, aligner, kmer_size, prefilter
+        test_seqs,
+        subject_seqs,
+        subject_kmers,
+        kmer_index,
+        aligner,
+        kmer_size,
+        prefilter,
+        min_coverage=min_coverage,
     )
     arr = np.asarray([r[0] for r in results])
 
@@ -631,6 +711,9 @@ def audit_train_test_identity(
 
     report = {
         "threshold": threshold,
+        # Queda escrito en el informe porque el p-valor de fuga solo se puede
+        # leer sabiendo que definicion de homologo se audito (P-32).
+        "min_coverage": min_coverage,
         "query_split": query_split,
         "reference_split": reference_split,
         "n_test_audited": int(len(arr)),
@@ -676,7 +759,14 @@ def audit_train_test_identity(
                 rng.shuffle(chars)
                 shuffled.append("".join(chars))
             rep = _max_identity_against(
-                shuffled, subject_seqs, subject_kmers, kmer_index, aligner, kmer_size, prefilter
+                shuffled,
+                subject_seqs,
+                subject_kmers,
+                kmer_index,
+                aligner,
+                kmer_size,
+                prefilter,
+                min_coverage=min_coverage,
             )
             for i, (ident, _p) in enumerate(rep):
                 per_seq_null_max[i].append(ident)
@@ -1020,6 +1110,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     report["train_test_identity_audit"] = audit_train_test_identity(
         df,
         threshold=identity,
+        min_coverage=coverage,
         kmer_size=int(bcfg.get("kmer_size", 3)),
         prefilter=float(bcfg.get("kmer_prefilter", 0.05)),
         max_test=None if max_test is None else int(max_test),
@@ -1038,6 +1129,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
         report["train_val_identity_audit"] = audit_train_test_identity(
             df,
             threshold=identity,
+            min_coverage=coverage,
             kmer_size=int(bcfg.get("kmer_size", 3)),
             prefilter=float(bcfg.get("kmer_prefilter", 0.05)),
             max_test=None if max_val is None else int(max_val),

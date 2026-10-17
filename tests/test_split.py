@@ -312,7 +312,7 @@ class TestIdentityAudit:
                 {"id": "te1", "sequence": seq, "split": "test", "label": 1, "cluster_id": 1},
             ]
         )
-        audit = audit_train_test_identity(df, threshold=0.4)
+        audit = audit_train_test_identity(df, threshold=0.4, min_coverage=0.5)
         assert audit["n_over_threshold"] == 1
         assert audit["fraction_over_threshold"] == 1.0
         assert audit["max_identity_distribution"]["max"] == 1.0
@@ -336,14 +336,14 @@ class TestIdentityAudit:
                 },
             ]
         )
-        audit = audit_train_test_identity(df, threshold=0.4)
+        audit = audit_train_test_identity(df, threshold=0.4, min_coverage=0.5)
         assert audit["n_over_threshold"] == 0
 
     def test_empty_split_returns_error_not_crash(self):
         df = pd.DataFrame(
             [{"id": "tr1", "sequence": "GIGKFL", "split": "train", "label": 1, "cluster_id": 0}]
         )
-        assert "error" in audit_train_test_identity(df, threshold=0.4)
+        assert "error" in audit_train_test_identity(df, threshold=0.4, min_coverage=0.5)
 
 
 @pytest.mark.skipif(importlib.util.find_spec("Bio") is None, reason="Biopython no instalado")
@@ -381,7 +381,7 @@ class TestLeakageDetector:
         return pd.DataFrame(rows)
 
     def test_no_leakage_is_not_flagged(self):
-        audit = audit_train_test_identity(self._frame(0, 0.0), 0.4, null_replicates=20, seed=5)
+        audit = audit_train_test_identity(self._frame(0, 0.0), 0.4, 0.5, null_replicates=20, seed=5)
         assert not audit["leakage"]["significant"], f"falso positivo: {audit['leakage']}"
 
     def test_planted_leakage_is_detected(self):
@@ -391,7 +391,9 @@ class TestLeakageDetector:
         detectaba ni una fuga del 17% al 80% de identidad, porque comparaba dos
         proporciones ya saturadas por el ruido de fondo.
         """
-        audit = audit_train_test_identity(self._frame(12, 0.75), 0.4, null_replicates=20, seed=5)
+        audit = audit_train_test_identity(
+            self._frame(12, 0.75), 0.4, 0.5, null_replicates=20, seed=5
+        )
         leak = audit["leakage"]
         assert leak["significant"], f"no detecto 12 de 60 parientes al 75%: {leak}"
         assert leak["n_flagged"] > leak["n_expected_by_chance"]
@@ -423,7 +425,7 @@ class TestLeakageDetector:
                 {"id": "te0", "sequence": largo, "split": "test", "label": 1, "cluster_id": 2},
             ]
         )
-        audit = audit_train_test_identity(df, 0.4, null_model=False)
+        audit = audit_train_test_identity(df, 0.4, 0.5, null_model=False)
         assert (
             audit["max_identity_distribution"]["max"] == 1.0
         ), "el fragmento exacto corto debe encontrarse"
@@ -457,8 +459,10 @@ class TestValAudit:
     def test_finds_leakage_that_the_test_audit_cannot_see(self):
         df = self._df()
 
-        on_test = audit_train_test_identity(df, threshold=0.4, null_model=False)
-        on_val = audit_train_test_identity(df, threshold=0.4, null_model=False, query_split="val")
+        on_test = audit_train_test_identity(df, threshold=0.4, min_coverage=0.5, null_model=False)
+        on_val = audit_train_test_identity(
+            df, threshold=0.4, min_coverage=0.5, null_model=False, query_split="val"
+        )
 
         assert on_test["n_over_threshold"] == 0, "test esta limpio, y el audit de test lo dice"
         assert (
@@ -467,14 +471,14 @@ class TestValAudit:
 
     def test_report_says_which_splits_it_compared(self):
         audit = audit_train_test_identity(
-            self._df(), threshold=0.4, null_model=False, query_split="val"
+            self._df(), threshold=0.4, min_coverage=0.5, null_model=False, query_split="val"
         )
         assert audit["query_split"] == "val"
         assert audit["reference_split"] == "train"
 
     def test_missing_split_returns_error_not_crash(self):
         audit = audit_train_test_identity(
-            self._df(), threshold=0.4, null_model=False, query_split="no_existe"
+            self._df(), threshold=0.4, min_coverage=0.5, null_model=False, query_split="no_existe"
         )
         assert "error" in audit
         assert audit["query_split"] == "no_existe"
@@ -772,3 +776,95 @@ class TestFusionPorContencion:
         assert report["fraction_contained"] == 0.5
         assert report["n_containment_pairs"] == 3
         assert len(report["examples"]) == 3
+
+
+@pytest.mark.skipif(importlib.util.find_spec("Bio") is None, reason="Biopython no instalado")
+class TestAuditoriaExigeCobertura:
+    """P-32: la auditoria no puede marcar parejas que el agrupamiento no separa.
+
+    Las dos parejas de abajo son reales, sacadas de las secuencias que marcaba
+    la auditoria de val en la cuarta corrida. Un alineador global con huecos
+    encuentra cinco residuos dispersos dentro de casi cualquier peptido y
+    devuelve identidad 1.000; eso no es homologia, es aritmetica.
+
+    Medido, para que se vea por que el arreglo que P-32 tenia escrito (exigir
+    cobertura sobre la secuencia CORTA) no servia:
+
+        30 vs 5  identidad 1.000  /corta 1.000  /larga 0.167
+        29 vs 29 identidad 1.000  /corta 1.000  /larga 1.000
+    """
+
+    FALSOS_POSITIVOS = [
+        ("GIPCGESCVWIPCISGAIGCSCKSKVCYRN", "CCISG"),
+        ("ATCDLFSFRSKWVTPNHAGCAAHCIFLGNRG", "VTPFL"),
+    ]
+
+    HOMOLOGAS = [
+        ("KWKLFKKIGIGKFLHSAKKF", "KWKLFKKIGIGAFLHSAKKF"),
+        ("GIGKFLHSAKKFGKAFVGEIMNS", "GIGKFLHSAKKWGKAFVGEIMNS"),
+    ]
+
+    @staticmethod
+    def _df(largo: str, corto: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"id": "tr0", "sequence": largo, "split": "train", "label": 1, "cluster_id": 0},
+                {"id": "te0", "sequence": corto, "split": "test", "label": 1, "cluster_id": 1},
+            ]
+        )
+
+    @pytest.mark.parametrize(("largo", "corto"), FALSOS_POSITIVOS)
+    def test_no_marca_lo_que_el_agrupamiento_no_separa(self, largo, corto):
+        audit = audit_train_test_identity(
+            self._df(largo, corto), threshold=0.4, min_coverage=0.5, null_model=False
+        )
+        assert audit["n_over_threshold"] == 0, (
+            f"{corto} ({len(corto)} residuos) contra {len(largo)} da cobertura "
+            f"{len(corto) / len(largo):.2f} sobre la larga: el agrupamiento con "
+            f"-c 0.5 --cov-mode 1 nunca tuvo que separarlos"
+        )
+
+    @pytest.mark.parametrize(("a", "b"), HOMOLOGAS)
+    def test_sigue_marcando_las_homologas_de_verdad(self, a, b):
+        audit = audit_train_test_identity(
+            self._df(a, b), threshold=0.4, min_coverage=0.5, null_model=False
+        )
+        assert audit["n_over_threshold"] == 1, (
+            "el filtro de cobertura no puede cegar la auditoria ante parejas de "
+            "longitud parecida, que son las que si son homologia"
+        )
+
+    def test_marca_la_subcadena_exacta_aunque_no_llegue_a_la_cobertura(self):
+        """El segundo termino de la O: la garantia de D-20, no la de MMseqs2.
+
+        Si la auditoria filtrara solo por cobertura, una subcadena exacta corta
+        en un split distinto dejaria de marcarse, y eso es exactamente el fallo
+        que la fusion por contencion puede tener (P-31, P-31b fueron dos). La
+        guarda tiene que poder ver un fallo de D-20, no solo uno de MMseqs2.
+        """
+        largo = "GIGKFLHSAKKFGKAFVGEIMNSKKWWRRPLFVACDEGHIKLMNPQRSTV"
+        audit = audit_train_test_identity(
+            self._df(largo, largo[10:18]), threshold=0.4, min_coverage=0.5, null_model=False
+        )
+        assert audit["n_over_threshold"] == 1, (
+            f"cobertura {8 / len(largo):.2f}, por debajo de 0.5, pero es subcadena "
+            "exacta: tiene que marcarse por el segundo termino"
+        )
+
+    def test_el_informe_deja_escrita_la_definicion_usada(self):
+        audit = audit_train_test_identity(
+            self._df(*self.HOMOLOGAS[0]), threshold=0.4, min_coverage=0.5, null_model=False
+        )
+        assert audit["min_coverage"] == 0.5, (
+            "el p-valor de fuga solo se puede leer sabiendo que definicion de " "homologo se audito"
+        )
+
+    def test_min_coverage_no_tiene_valor_por_defecto(self):
+        """P-29 otra vez: un defecto se comporta como una decision del proyecto.
+
+        Quien audite declara que definicion de homologo usa, o no compila.
+        """
+        import inspect
+
+        firma = inspect.signature(audit_train_test_identity)
+        assert firma.parameters["min_coverage"].default is inspect.Parameter.empty

@@ -1178,7 +1178,8 @@ afirmacion del README se pasa explicito aunque coincida con el defecto.
 ---
 
 ## P-30 — El 8.5% del conjunto son fragmentos de otras secuencias, y MMseqs2 no puede verlos
-**Fecha:** 2026-10-17 · **Estado:** ABIERTO, medido, con dos arreglos candidatos
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO con la fusion por contencion (D-20).
+Bajo la fuga de test de +34.2 a +10.2. Lo que quedo no es de esta causa: ver P-32.
 
 **Sintoma:** con `--cluster-mode 1` ya puesto, la auditoria sigue marcando fuga
 significativa (exceso +34.2 en test, +32.2 en val).
@@ -1310,6 +1311,70 @@ funcion, pero ninguno con **dos** contenedores, que era el caso que importaba.
 
 El test que lo fija planta justo eso: un fragmento dentro de dos contenedores que
 no se contienen entre si, y exige que los tres clusteres acaben siendo uno.
+
+---
+
+## P-32 — La auditoria tira la cobertura, y por eso marca parejas que no son homologas
+**Fecha:** 2026-10-17 · **Estado:** ABIERTO, diagnosticado, arreglo propuesto sin aplicar
+
+**Sintoma:** con `--cluster-mode 1` y la fusion por contencion ya puestos, la
+fuga de test bajo a +10.2 (p = 0.025) pero la de val se quedo en +28.2 (p = 0).
+Al listar lo que marca val:
+
+```
+GIPCGESCVWIPCISGAIGCSCKSKVCYRN   vs  CCISG    identidad 1.000
+ATCDLFSFRSKWVTPNHAGCAAHCIFLGNRG  vs  VTPFL    identidad 1.000
+```
+
+`CCISG` son **cinco residuos**. Un alineador global con huecos los encuentra
+dispersos dentro de casi cualquier peptido rico en cisteina y devuelve identidad
+1.00. Eso no es homologia, es aritmetica. En el conjunto hay **536 secuencias de
+5 a 7 residuos** (`min_length: 5`), y de ahi viene la asimetria entre val y test:
+a val le tocaron mas de esas.
+
+**Causa:** una incoherencia de definiciones que estaba ahi desde el principio.
+
+| | Identidad | Cobertura |
+|---|---|---|
+| Agrupamiento (MMseqs2) | `--min-seq-id 0.4` | `-c 0.5 --cov-mode 1` |
+| Auditoria de fuga | se usa | **se descarta** |
+
+En `_max_identity_against`, literalmente:
+
+```python
+ident, _cov = identity_and_coverage(subject_seqs[idx], query, aligner)
+```
+
+La auditoria marca por tanto parejas que el agrupamiento **nunca tuvo la
+obligacion de separar**. No estan midiendo lo mismo, asi que el p-valor de fuga
+no es interpretable como "el agrupamiento fallo": mezcla fallos reales del
+agrupamiento con parejas que quedan fuera de su definicion de homologo.
+
+**Arreglo propuesto (no aplicado):** exigir en la auditoria el mismo
+`min_coverage` que exige el agrupamiento, leido del mismo sitio en `params.yaml`.
+Una pareja solo cuenta si pasa identidad **y** cobertura.
+
+**Por que esto NO es la trampa que rechaza D-20:** D-20 rechaza que la guarda use
+la misma **regla** que lo vigilado, es decir el mismo alineador, porque entonces
+no puede ver sus puntos ciegos. Aqui los alineadores siguen siendo distintos
+—MMseqs2 agrupa, Biopython audita— y lo que se iguala es la **definicion de
+homologo**, que tienen que compartir o la guarda esta midiendo otra cosa que la
+garantizada. La distincion entre compartir regla y compartir definicion es la
+parte fina de este problema y conviene no perderla.
+
+**Expectativa declarada antes de medir**, para que no valga retocarla despues: la
+fuga de test deja de ser significativa y la de val baja mucho. Si val sigue
+significativa, el residuo ya es homologia real y la respuesta correcta es
+declararlo en el informe y usar la curva de umbral de identidad (M-01) como forma
+publicable de cerrarlo, no seguir ajustando parametros hasta que el numero salga
+bien. Eso ultimo seria exactamente el fallo que todo este repositorio existe para
+evitar.
+
+**Alternativa descartada:** subir `min_length` para que no haya peptidos de 5
+residuos. Resuelve el sintoma tirando datos reales y, peor, por el motivo
+equivocado: esos peptidos existen y el clasificador tendra que puntuarlos. El
+problema no es que esten en el conjunto, es que la metrica de identidad no sirve
+para ellos.
 
 ---
 

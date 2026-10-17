@@ -406,3 +406,52 @@ decision es irrelevante y no molesta.
 
 **Relacionado:** P-28, P-13, P-25, D-15 (el caso plantado que no reproducia el
 mecanismo real), D-18 (el aviso de `.venv` real avisa y no aborta).
+
+---
+
+## D-20 — Los fragmentos se fusionan por contencion exacta, no alineando
+
+**Contexto:** tras poner `--cluster-mode 1`, la auditoria seguia marcando fuga
+significativa, y al medirla result que no era parentesco sutil: la mediana de
+identidad de las marcadas era 0.917. Eran fragmentos — el peptido maduro dentro
+de su precursor, o el mismo registro con los bordes cortados distinto entre
+bases. **1 582 de 18 644 secuencias (8.5%) son subcadena exacta de otra.**
+MMseqs2 no las ve a 8-15 residuos y no hay configuracion que lo arregle (P-30).
+
+**Opciones:**
+
+1. **Fusionar por contencion de subcadena.** Criterio exacto, sin alineador.
+   Deteccion con indice de k-meros, segundos. No pierde datos.
+2. **Pasada de fusion por pares con el alineador del proyecto**, uniendo todo par
+   por encima del 40%. ~12 min medidos. Alcanza tambien a los casos que no son
+   subcadena (inserciones internas, sustituciones).
+3. **Eliminar las 1 582 secuencias contenidas.** Pierde el 8.5% del conjunto, y
+   en los pares maduro/precursor obliga a elegir cual de los dos sobra, que es
+   una decision biologica que no toca tomar aqui.
+
+**Decision: la 1.** No por coste, sino por lo que la 2 le haria a la auditoria.
+
+El agrupamiento mide con MMseqs2 y la auditoria mide con Biopython. Son dos
+reglas distintas, y de ahi viene que la auditoria pueda encontrar violaciones que
+el agrupamiento nunca evaluo — que es exactamente lo que se quiere de una guarda.
+La opcion 2 iguala las dos reglas y, por construccion, la auditoria dejaria de
+marcar fuga.
+
+Eso parece la solucion y es en parte una trampa: **una guarda que comparte regla
+con lo que vigila no puede detectar los puntos ciegos de esa regla.** El numero
+saldria limpio sin que nadie pueda afirmar que lo esta. Se cambiaria un problema
+visible por uno invisible, que es el peor negocio disponible.
+
+La contencion de subcadena no tiene ese defecto: es exacta, no tiene parametros
+de penalizacion de huecos, y es independiente de cualquier alineador. La
+auditoria conserva su regla propia y sigue pudiendo contradecir al agrupamiento.
+
+**Lo que esta decision acepta:** la contencion no alcanza a los casos que no son
+subcadena (`AEAMSQVTNTATIM` contra `AEASQVTNTATIM`, una delecion interna). La
+fuga baja pero no se espera que llegue a cero, y eso queda declarado en el
+informe en vez de disimulado. Si llega el momento de cerrarlo, la via es la curva
+de umbral de identidad (M-01), que convierte el residuo en una figura publicable
+en lugar de en una afirmacion de limpieza.
+
+**Relacionado:** P-30, P-31 (el bug que introdujo la implementacion), D-15,
+M-01.

@@ -1240,6 +1240,79 @@ independiente de cualquier alineador.
 
 ---
 
+## P-31 — La fusion por contencion cortaba el bucle y perdia 803 casos
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO con test · **lo introduje yo**
+
+**Sintoma:** con la fusion por contencion ya puesta (D-20), la fuga bajo de
++34.2 a +20.2 en test pero apenas se movio en val (+32.2 -> +30.2). Al listar las
+marcadas que quedaban aparecio esto:
+
+```
+MPFSTGKRIMLGE                  ->  cluster 3127 (val)
+AAVALLPAVLLALLAPMPFSTGKRIMLGE  ->  cluster 3126 (train)
+```
+
+La primera es subcadena exacta de la segunda. La fusion tenia que haberlas unido
+y las dejo en clusteres **consecutivos**, uno en val y otro en train.
+
+**Causa:** la implementacion hacia `break` tras encontrar el primer contenedor.
+Medido: **803 de las 1 582 secuencias contenidas lo estan en mas de un
+contenedor**, asi que el `break` dejaba sin unir todos los demas enlaces y la
+componente conexa nunca se completaba.
+
+Y habia un segundo defecto encima: el bucle iteraba sobre un `set`, cuyo orden no
+es estable entre procesos. Cual de los contenedores se elegia **no era
+reproducible**, en un proyecto cuya primera promesa es la reproducibilidad.
+
+**Resolucion:** se quita el `break` y se une con **todos** los contenedores,
+recorridos en orden ordenado para que el resultado no dependa del orden del
+`set`. El informe separa ahora `n_contained_sequences` de
+`n_containment_pairs`: una secuencia dentro de tres contenedores es una
+secuencia redundante y tres enlaces, y mezclar las dos cifras infla el 8.5%.
+
+**Segundo defecto, encontrado por el mismo diagnostico (P-31b):** tras quitar el
+`break`, `RPPGFSPFR` (test) y `ERPPGFSPFR` (train) **seguian** en clusteres
+distintos, el 1320 y el 827, siendo subcadena limpia. La causa era el
+reetiquetado: el union-find se hacia sobre **secuencias** y luego se recorrian
+los grupos uno a uno moviendo todas las secuencias de los clusteres afectados,
+leyendo del mapeo **original**. Cuando dos grupos de contencion compartian un
+cluster, el segundo deshacia la fusion del primero.
+
+Reproducido con el caso minimo que distingue las dos versiones (`frag_a` en el
+cluster 5 con su contenedor en el 2, y `cont_b` tambien en el 5):
+
+```
+version antigua: {frag_a: 5, cont_a: 2, frag_b: 5, cont_b: 5}  -> 2 clusteres
+version actual : {frag_a: 2, cont_a: 2, frag_b: 2, cont_b: 2}  -> 1 cluster
+```
+
+El fragmento acababa separado de su propio contenedor. Arreglado haciendo el
+union-find **sobre clusteres** en vez de sobre secuencias, que es la estructura
+correcta del problema: lo que se fusiona son clusteres, y la secuencia solo
+aporta la arista. El id resultante es el menor del componente, para que no
+dependa del orden en que se encuentren las parejas.
+
+Nota de metodo sobre este hallazgo: el primer intento de validar el arreglo
+construyo un caso que **las dos versiones pasaban**, y por un momento parecio que
+el test servia. Solo construyendo a mano el caso con objetivos de fusion
+distintos se vio la diferencia. Es la misma leccion de P-28: un caso plantado que
+no reproduce el mecanismo da un verde que no vale, y la unica forma de saberlo es
+ejecutar la version mala y verla fallar.
+
+**Leccion, y es incomoda:** esto es P-14 otra vez. P-14 fue exactamente "un
+`break` en el bucle de emparejado pierde parejas y falsea la auditoria a la
+baja", y hay un comentario de ocho lineas explicandolo en
+`_max_identity_against`, **veinte lineas por encima** del codigo donde volvi a
+hacerlo. Conocer el patron no basta: hay que buscarlo activamente en cada bucle
+nuevo que recorra candidatos. El habito que lo habria evitado es el que ya esta
+escrito en D-15 y que aqui aplique a medias — plante casos positivos para la
+funcion, pero ninguno con **dos** contenedores, que era el caso que importaba.
+
+El test que lo fija planta justo eso: un fragmento dentro de dos contenedores que
+no se contienen entre si, y exige que los tres clusteres acaben siendo uno.
+
+---
+
 ## Plantilla para entradas nuevas
 
 ```

@@ -20,6 +20,7 @@ from ampesm.split import (
     cluster_builtin,
     cluster_mmseqs2,
     kmer_set,
+    merge_contained_clusters,
 )
 
 FRACTIONS = {"train": 0.70, "val": 0.15, "test": 0.15}
@@ -610,3 +611,158 @@ class TestClusterModeExplicito:
             "que nada por encima del umbral cruce la frontera (P-29)"
         )
         assert cmd[cmd.index("--cluster-mode") + 1] == "1"
+
+
+class TestFusionPorContencion:
+    """P-30: el 8.5% del conjunto son subcadenas exactas de otras secuencias.
+
+    Los casos de abajo son reales, sacados de la auditoria de la primera corrida
+    con --cluster-mode 1, y MMseqs2 no agrupa ninguno (comprobado preguntandole
+    pareja por pareja con todo permisivo: encuentra 3 de 8).
+    """
+
+    CASOS_REALES = [
+        ("SLDCVLRP", "SKHSSLDCVLRP"),
+        ("LFYLVPGPGH", "QLLIRMIYKNILFYLVPGPGHGAEPERRNIKYL"),
+        ("ILGKIIKVVK", "NVWKKILGKIIKVVK"),
+        ("PFKLSLHL", "TPFKLSLHL"),
+        ("KKKKVVAATYVLF", "KKKKVVAATYVLFA"),
+    ]
+
+    def test_une_los_casos_reales_que_mmseqs2_no_ve(self):
+        sequences, mapping = {}, {}
+        for i, (corta, larga) in enumerate(self.CASOS_REALES):
+            sequences[f"corta_{i}"] = corta
+            sequences[f"larga_{i}"] = larga
+            mapping[f"corta_{i}"] = 2 * i
+            mapping[f"larga_{i}"] = 2 * i + 1
+
+        merged, report = merge_contained_clusters(sequences, mapping)
+
+        for i in range(len(self.CASOS_REALES)):
+            assert (
+                merged[f"corta_{i}"] == merged[f"larga_{i}"]
+            ), f"el caso {self.CASOS_REALES[i]} sigue partido en dos clusteres"
+        assert report["n_contained_sequences"] == len(self.CASOS_REALES)
+        assert report["clusters_after"] == len(self.CASOS_REALES)
+
+    def test_no_une_secuencias_sin_relacion(self):
+        sequences = {"a": "KWKLFKKIGAVLKVL", "b": "ACDEFGHIKLMNPQRS", "c": "MSTYWVQNDEHGPLK"}
+        mapping = {"a": 0, "b": 1, "c": 2}
+        merged, report = merge_contained_clusters(sequences, mapping)
+        assert merged == mapping
+        assert report["n_contained_sequences"] == 0
+        assert report["n_cluster_merges"] == 0
+
+    def test_arrastra_a_los_companeros_de_cluster(self):
+        # El fallo opuesto al que arregla la funcion: si al fusionar solo se
+        # mueven las dos secuencias emparentadas, una tercera que compartia
+        # cluster con el fragmento se queda atras y el cluster se PARTE, lo que
+        # crearia fuga nueva en vez de quitarla.
+        sequences = {
+            "frag": "SLDCVLRP",
+            "cont": "SKHSSLDCVLRP",
+            "vecina": "KWKLFKKIGAVLKVL",
+        }
+        mapping = {"frag": 7, "vecina": 7, "cont": 3}
+        merged, _ = merge_contained_clusters(sequences, mapping)
+        assert merged["frag"] == merged["cont"] == merged["vecina"], (
+            "la vecina del fragmento quedo en otro cluster: la fusion partio un "
+            "cluster que ya estaba bien"
+        )
+
+    def test_une_con_todos_los_contenedores_no_solo_el_primero(self):
+        # P-31: 803 de las 1 582 secuencias contenidas del conjunto real estan
+        # dentro de mas de un contenedor. Cortar en el primero dejaba el resto
+        # sin unir y, al depender del orden de iteracion de un set, no era ni
+        # reproducible. Aqui el fragmento esta en dos contenedores que no se
+        # contienen entre si: los tres clusteres tienen que acabar en uno.
+        sequences = {
+            "frag": "MPFSTGKRIMLGE",
+            "cont_a": "AAVALLPAVLLALLAPMPFSTGKRIMLGE",
+            "cont_b": "MPFSTGKRIMLGEWWWWDDDD",
+        }
+        mapping = {"frag": 10, "cont_a": 20, "cont_b": 30}
+        merged, report = merge_contained_clusters(sequences, mapping)
+        assert (
+            len(set(merged.values())) == 1
+        ), "el fragmento solo se unio a uno de sus dos contenedores"
+        assert report["n_contained_sequences"] == 1
+        assert report["n_containment_pairs"] == 2
+
+    def test_dos_fusiones_que_se_solapan_no_se_sobrescriben(self):
+        # P-31b: la primera version hacia union-find sobre SECUENCIAS y luego
+        # reetiquetaba grupo a grupo leyendo del mapeo original. Cuando dos
+        # grupos compartian un cluster, el segundo deshacia la fusion del
+        # primero. Sintoma real: RPPGFSPFR quedo en test y ERPPGFSPFR, que lo
+        # contiene, en train.
+        #
+        # El caso de abajo es el minimo que distingue las dos versiones:
+        # cont_b comparte cluster (5) con frag_a, cuyo contenedor esta en el 2.
+        # La version mala dejaba frag_a en 5 y cont_a en 2, separando el
+        # fragmento de su propio contenedor. Verificado reproduciendo la
+        # version antigua: daba 2 clusteres donde debe haber 1.
+        sequences = {
+            "frag_a": "SLDCVLRP",
+            "cont_a": "SKHSSLDCVLRP",
+            "frag_b": "RPPGFSPFR",
+            "cont_b": "ERPPGFSPFR",
+        }
+        mapping = {"frag_a": 5, "cont_a": 2, "frag_b": 9, "cont_b": 5}
+        merged, _ = merge_contained_clusters(sequences, mapping)
+        assert (
+            merged["frag_a"] == merged["cont_a"]
+        ), "el fragmento quedo separado de su propio contenedor"
+        assert (
+            len(set(merged.values())) == 1
+        ), f"una fusion sobrescribio a la otra: {sorted(set(merged.values()))}"
+        assert set(merged.values()) == {2}, "el cluster resultante debe ser el id menor"
+
+    def test_el_resultado_no_depende_del_orden_de_entrada(self):
+        # El id del cluster resultante tiene que ser el menor de los fusionados,
+        # no el primero que se encuentre: si no, dos corridas con los mismos
+        # datos dan informes distintos (P-31).
+        casos = {
+            "a": "SLDCVLRP",
+            "b": "SKHSSLDCVLRP",
+            "c": "MMSKHSSLDCVLRPWW",
+        }
+        m1 = {"a": 9, "b": 4, "c": 7}
+        merged1, _ = merge_contained_clusters(casos, m1)
+        merged2, _ = merge_contained_clusters(
+            dict(reversed(list(casos.items()))), dict(reversed(list(m1.items())))
+        )
+        assert set(merged1.values()) == {4}
+        assert merged1 == merged2
+
+    def test_la_contencion_es_transitiva(self):
+        # a dentro de b, b dentro de c: los tres al mismo cluster.
+        sequences = {"a": "SLDCVLRP", "b": "SKHSSLDCVLRP", "c": "MMSKHSSLDCVLRPWW"}
+        mapping = {"a": 0, "b": 1, "c": 2}
+        merged, report = merge_contained_clusters(sequences, mapping)
+        assert len(set(merged.values())) == 1
+        assert report["clusters_after"] == 1
+
+    def test_secuencias_mas_cortas_que_el_prefiltro_no_rompen_nada(self):
+        sequences = {"corta": "AC", "larga": "ACDEFGH"}
+        mapping = {"corta": 0, "larga": 1}
+        merged, report = merge_contained_clusters(sequences, mapping)
+        # No se afirma que las encuentre: se afirma que no revienta. Con
+        # min_length 5 en params no llegan aqui.
+        assert merged["larga"] == 1
+        assert report["n_contained_sequences"] == 0
+
+    def test_el_informe_cuenta_lo_que_dice_contar(self):
+        sequences, mapping = {}, {}
+        for i, (corta, larga) in enumerate(self.CASOS_REALES[:3]):
+            sequences[f"c{i}"] = corta
+            sequences[f"l{i}"] = larga
+            mapping[f"c{i}"] = 2 * i
+            mapping[f"l{i}"] = 2 * i + 1
+        _, report = merge_contained_clusters(sequences, mapping)
+        assert report["clusters_before"] == 6
+        assert report["clusters_after"] == 3
+        assert report["n_cluster_merges"] == 3
+        assert report["fraction_contained"] == 0.5
+        assert report["n_containment_pairs"] == 3
+        assert len(report["examples"]) == 3

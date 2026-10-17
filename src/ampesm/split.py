@@ -862,6 +862,17 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     if not mapping:
         raise RuntimeError(f"Ningun metodo de clustering funciono. Probados: {methods}")
 
+    # P-30: la fusion por contencion va DESPUES del agrupamiento y antes de
+    # repartir, y se aplica cualquiera sea el metodo usado: el punto ciego que
+    # tapa (fragmentos de 8-15 residuos) lo tienen los tres.
+    mapping, contained_report = merge_contained_clusters(sequences, mapping)
+    print(
+        f"[split] fusion por contencion: {contained_report['n_contained_sequences']} "
+        f"secuencias son subcadena de otra, "
+        f"{contained_report['clusters_before']} -> {contained_report['clusters_after']} "
+        f"clusteres ({contained_report['n_cluster_merges']} fusiones)"
+    )
+
     df["cluster_id"] = df.id.map(mapping)
     if df.cluster_id.isna().any():
         missing = int(df.cluster_id.isna().sum())
@@ -968,6 +979,7 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
             "exacto esta en publishable_reasons."
         ),
         "publishable_reasons": [],
+        "contained_merge": contained_report,
         "cluster_diagnostics": cluster_diagnostics,
         "splits": {},
     }
@@ -1192,3 +1204,113 @@ def _publishable_reasons(report: dict, used_method: str) -> list[str]:
                 f"esperadas por azar, p = {leak['global_p_value']:.3g})"
             )
     return reasons
+
+
+def merge_contained_clusters(
+    sequences: dict[str, str],
+    mapping: dict[str, int],
+    min_kmer: int = 4,
+    max_examples: int = 10,
+) -> tuple[dict[str, int], dict]:
+    """Fusiona los clusteres de toda secuencia que sea subcadena exacta de otra.
+
+    Motivo (P-30): el 8.5% del conjunto son fragmentos de otras secuencias -el
+    peptido maduro dentro de su precursor, o el mismo registro con los bordes
+    cortados de otra forma en DRAMP y APD3- y MMseqs2 no los agrupa. No es
+    configuracion: su prefiltro necesita k-meros de 6-7 residuos y un peptido de
+    8 tiene dos o tres, asi que desplazar una letra los destruye. Preguntandole
+    pareja por pareja con todo permisivo solo encuentra 3 de 8 casos reales.
+
+    Se eligio este criterio y no una pasada de alineamiento por pares (P-30,
+    opcion 2) porque la contencion de subcadenas es **exacta e independiente de
+    cualquier alineador**. La auditoria de fuga mide con Biopython; si el
+    agrupamiento midiera con la misma regla, la auditoria dejaria de poder
+    detectar los puntos ciegos de esa regla. Una guarda que comparte regla con
+    lo que vigila no es una guarda. Ver D-20.
+
+    El prefiltro de k-meros es una interseccion, no una union: una secuencia solo
+    puede estar contenida en otra que contenga **todos** sus k-meros. Eso es una
+    condicion necesaria exacta, asi que el prefiltro no descarta ningun caso
+    verdadero; solo evita las 174 millones de comparaciones ciegas.
+    """
+    ids = list(sequences)
+    seq_of = sequences
+    # Indice de k-meros -> ids que lo contienen, solo de las secuencias que
+    # pueden ser el contenedor (cualquiera: la longitud se comprueba despues).
+    index: dict[str, set[str]] = defaultdict(set)
+    for sid in ids:
+        s = seq_of[sid]
+        for i in range(len(s) - min_kmer + 1):
+            index[s[i : i + min_kmer]].add(sid)
+
+    # Union-find sobre CLUSTERES, no sobre secuencias (P-31b). La primera
+    # version unia secuencias y luego reetiquetaba grupo a grupo leyendo del
+    # mapeo original: si dos grupos de contencion tocaban el mismo cluster, el
+    # segundo sobrescribia la fusion del primero. Resultado medido: RPPGFSPFR
+    # quedo en test y ERPPGFSPFR en train, siendo subcadena limpia.
+    parent: dict[int, int] = {cid: cid for cid in set(mapping.values())}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            # Al menor, para que el id del cluster resultante no dependa del
+            # orden en que se encuentren las parejas.
+            lo, hi = min(ra, rb), max(ra, rb)
+            parent[hi] = lo
+
+    contained: list[tuple[str, str]] = []
+    for sid in ids:
+        s = seq_of[sid]
+        if len(s) < min_kmer:
+            # Demasiado corta para el prefiltro. `min_length: 5` en params la
+            # excluye del conjunto, pero la funcion no puede dar eso por hecho.
+            continue
+        kmers = [s[i : i + min_kmer] for i in range(len(s) - min_kmer + 1)]
+        candidates = set(index[kmers[0]])
+        for km in kmers[1:]:
+            candidates &= index[km]
+            if not candidates:
+                break
+        # Sin 'break' en este bucle: 803 de las 1 582 secuencias contenidas lo
+        # estan en MAS DE UN contenedor (P-31). Cortar en el primero dejaba el
+        # resto sin unir y hacia el resultado dependiente del orden de iteracion
+        # de un set, que no es estable entre procesos. Es la trampa de P-14.
+        containers = sorted(
+            cid
+            for cid in candidates
+            if cid != sid and len(seq_of[cid]) > len(s) and s in seq_of[cid]
+        )
+        for cid in containers:
+            contained.append((sid, cid))
+            union(mapping[cid], mapping[sid])
+
+    merged = {sid: find(cid) for sid, cid in mapping.items()}
+    n_merges = len(set(mapping.values())) - len(set(merged.values()))
+
+    report = {
+        # Por secuencia, no por par: una secuencia dentro de tres contenedores
+        # aporta tres pares y una sola secuencia redundante.
+        "n_contained_sequences": len({a for a, _ in contained}),
+        "n_containment_pairs": len(contained),
+        "fraction_contained": round(len({a for a, _ in contained}) / max(len(ids), 1), 4),
+        "n_cluster_merges": n_merges,
+        "clusters_before": len(set(mapping.values())),
+        "clusters_after": len(set(merged.values())),
+        "examples": [
+            {"contained": seq_of[a], "container": seq_of[b], "ids": [a, b]}
+            for a, b in contained[:max_examples]
+        ],
+        "note": (
+            "Secuencias que son subcadena exacta de otra mas larga. MMseqs2 no "
+            "las agrupa a 8-15 residuos (P-30), asi que sin esta fusion acaban "
+            "en splits distintos con identidad ~1.00. El criterio es exacto y no "
+            "usa alineador, a proposito: ver D-20."
+        ),
+    }
+    return merged, report

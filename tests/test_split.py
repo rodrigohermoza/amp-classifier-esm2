@@ -14,7 +14,7 @@ import pytest
 
 from ampesm.split import (
     _positive_rate_drift,
-    _publishable_reasons,
+    _publication_gates,
     assign_splits,
     audit_train_test_identity,
     cluster_builtin,
@@ -517,12 +517,20 @@ class TestPositiveRateDrift:
         assert not drift["exceeds_tolerance"]
 
 
-class TestPublishableTieneEnCuentaLaFuga:
-    """P-29: `publishable` salio true con fuga significativa en test Y en val.
+class TestPuertasDePublicacion:
+    """P-29 y D-22: que impide publicar y que hay que declarar al publicar.
 
-    El campo solo miraba la herramienta de clustering. Un indicador que se llama
-    "publishable" y no mira el resultado de la auditoria invita a saltarse justo
-    la lectura que importa.
+    Historia de este campo, que explica por que esta separado en dos listas:
+
+    1. `publishable` solo miraba la herramienta de clustering, y en la primera
+       corrida real dijo `true` con fuga significativa en test Y en val (P-29);
+    2. se arreglo metiendo la fuga en la misma lista, y entonces la puerta no se
+       abria nunca: con una fuga real, medida y declarada, el proyecto no
+       producia ningun numero. Eso no es honestidad, es paralisis, y empuja a
+       retocar parametros hasta que la puerta ceda (D-22).
+
+    Ahora la fuga es **salvedad** (se publica declarandola, junto a M-01) y lo
+    que no tiene interpretacion posible es **bloqueo**.
     """
 
     @staticmethod
@@ -538,49 +546,61 @@ class TestPublishableTieneEnCuentaLaFuga:
             },
         }
 
-    def test_fuga_en_test_lo_vuelve_no_publicable(self):
-        report = {"train_test_identity_audit": self._audit("test", True)}
-        reasons = _publishable_reasons(report, "mmseqs2")
-        assert len(reasons) == 1
-        assert "test-vs-train" in reasons[0]
+    def _report(self, test_sig, val_sig):
+        return {
+            "train_test_identity_audit": self._audit("test", test_sig),
+            "train_val_identity_audit": self._audit("val", val_sig),
+        }
 
-    def test_fuga_solo_en_val_tambien_lo_vuelve_no_publicable(self):
+    def test_la_fuga_es_salvedad_y_no_bloqueo(self):
+        bloqueos, salvedades = _publication_gates(self._report(True, True), "mmseqs2")
+        assert bloqueos == [], "una fuga medida y declarada no impide publicar (D-22)"
+        assert len(salvedades) == 2
+
+    def test_la_salvedad_lleva_las_cifras_y_la_via_para_cerrarla(self):
+        _b, salvedades = _publication_gates(self._report(True, False), "mmseqs2")
+        texto = salvedades[0]
+        assert "test-vs-train" in texto
+        assert "+50.2" in texto, "sin el exceso la salvedad no es cuantitativa"
+        assert "M-01" in texto, "declarar un defecto sin decir como se cierra es media salvedad"
+
+    def test_fuga_solo_en_val_tambien_se_declara(self):
         # val fija el umbral que se aplica a test, asi que la fuga val-train
         # sesga las metricas de test aunque test este limpio (P-27).
-        report = {
-            "train_test_identity_audit": self._audit("test", False),
-            "train_val_identity_audit": self._audit("val", True),
-        }
-        reasons = _publishable_reasons(report, "mmseqs2")
-        assert len(reasons) == 1
-        assert "val-vs-train" in reasons[0]
+        _b, salvedades = _publication_gates(self._report(False, True), "mmseqs2")
+        assert len(salvedades) == 1
+        assert "val-vs-train" in salvedades[0]
 
-    def test_el_caso_real_de_la_primera_corrida_acumula_los_dos_motivos(self):
-        report = {
-            "train_test_identity_audit": self._audit("test", True),
-            "train_val_identity_audit": self._audit("val", True),
-        }
-        reasons = _publishable_reasons(report, "mmseqs2")
-        assert len(reasons) == 2
+    def test_sin_fuga_y_con_mmseqs2_no_hay_nada_que_declarar(self):
+        bloqueos, salvedades = _publication_gates(self._report(False, False), "mmseqs2")
+        assert bloqueos == []
+        assert salvedades == []
 
-    def test_sin_fuga_y_con_mmseqs2_es_publicable(self):
+    def test_el_respaldo_propio_si_bloquea(self):
+        # P-23: su umbral efectivo sigue sin medirse, asi que el numero no tiene
+        # interpretacion. No se puede declarar lo que no se conoce.
+        bloqueos, _s = _publication_gates(self._report(False, False), "builtin")
+        assert len(bloqueos) == 1
+        assert "respaldo propio" in bloqueos[0]
+
+    def test_una_auditoria_que_fallo_bloquea(self):
+        """Cambio de comportamiento deliberado respecto a la version anterior.
+
+        Antes, una auditoria con error **no aportaba motivo**, asi que
+        `publishable` salia `true` sin haberse comprobado la fuga: P-29 otra vez
+        por otra puerta. No se puede declarar lo que no se midio.
+        """
         report = {
-            "train_test_identity_audit": self._audit("test", False),
+            "train_test_identity_audit": {"error": "falta el split test"},
             "train_val_identity_audit": self._audit("val", False),
         }
-        assert _publishable_reasons(report, "mmseqs2") == []
+        bloqueos, _s = _publication_gates(report, "mmseqs2")
+        assert len(bloqueos) == 1
+        assert "fallo" in bloqueos[0]
 
-    def test_el_respaldo_propio_sigue_contando_como_motivo(self):
-        report = {"train_test_identity_audit": self._audit("test", False)}
-        reasons = _publishable_reasons(report, "builtin")
-        assert len(reasons) == 1
-        assert "respaldo propio" in reasons[0]
-
-    def test_una_auditoria_con_error_no_se_toma_por_limpia(self):
-        # Que la auditoria no haya podido correr no es evidencia de ausencia de
-        # fuga, pero tampoco se puede afirmar que la haya: no aporta motivo.
-        report = {"train_test_identity_audit": {"error": "falta el split test"}}
-        assert _publishable_reasons(report, "mmseqs2") == []
+    def test_una_auditoria_que_falta_bloquea(self):
+        bloqueos, _s = _publication_gates({}, "mmseqs2")
+        assert len(bloqueos) == 2, "faltan las dos auditorias, y ninguna se da por limpia"
 
 
 class TestClusterModeExplicito:

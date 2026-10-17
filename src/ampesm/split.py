@@ -1062,13 +1062,16 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
         # significativa en test Y en val (P-29).
         "publishable": used_method != "builtin",
         "publishable_note": (
-            "false significa que no se cumple alguna condicion para publicar "
-            "metricas con esta division: o se uso el respaldo propio en Python, "
-            "que agrupa menos que MMseqs2 (docs/09, P-03), o alguna auditoria "
-            "detecto fuga por homologia significativa (docs/09, P-29). El motivo "
-            "exacto esta en publishable_reasons."
+            "publishable=false significa que algo IMPIDE publicar metricas con "
+            "esta division, y esta en publication_blockers. Es distinto de "
+            "publication_caveats, que son defectos medidos que NO impiden "
+            "publicar pero tienen que ir escritos al lado de cada numero. La "
+            "distincion es D-22: la puerta impide publicar en silencio, no "
+            "publicar. Una puerta que nunca se abre no produce honestidad, "
+            "produce paralisis."
         ),
-        "publishable_reasons": [],
+        "publication_blockers": [],
+        "publication_caveats": [],
         "contained_merge": contained_report,
         "cluster_diagnostics": cluster_diagnostics,
         "splits": {},
@@ -1141,8 +1144,10 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
 
     # P-29: `publishable` se decide aqui y no arriba, porque hasta este punto no
     # se sabe el resultado de las auditorias de fuga.
-    report["publishable_reasons"] = _publishable_reasons(report, used_method)
-    report["publishable"] = not report["publishable_reasons"]
+    blockers, caveats = _publication_gates(report, used_method)
+    report["publication_blockers"] = blockers
+    report["publication_caveats"] = caveats
+    report["publishable"] = not blockers
 
     SPLIT_REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -1198,9 +1203,17 @@ def build_splits(force_method: str | None = None) -> pd.DataFrame:
     if drift["exceeds_tolerance"]:
         print(f"[split] AVISO: {drift['note']}")
 
-    if not report["publishable"]:
-        print("[split] AVISO: publishable=false. No publiques metricas con esta division:")
-        for reason in report["publishable_reasons"]:
+    if report["publication_blockers"]:
+        print("[split] publishable=false. Nada publicable con esta division:")
+        for reason in report["publication_blockers"]:
+            print(f"[split]   - {reason}")
+    if report["publication_caveats"]:
+        print(
+            "[split] publishable=true CON SALVEDADES. Cada metrica de esta "
+            "division va acompañada de esto (D-22), y `evaluate` lo escribe "
+            "dentro del JSON y en el pie de las figuras:"
+        )
+        for reason in report["publication_caveats"]:
             print(f"[split]   - {reason}")
 
     print(f"[split] {SPLITS_PATH}")
@@ -1267,35 +1280,65 @@ def _positive_rate_drift(splits_report: dict, audit_cfg) -> dict:
     }
 
 
-def _publishable_reasons(report: dict, used_method: str) -> list[str]:
-    """Motivos por los que NO se pueden publicar metricas con esta division.
+def _publication_gates(report: dict, used_method: str) -> tuple[list[str], list[str]]:
+    """Separa lo que IMPIDE publicar de lo que hay que DECLARAR al publicar.
 
-    Lista vacia = publicable. Se calcula despues de las auditorias a proposito:
-    la version anterior solo miraba la herramienta de clustering y en la primera
-    corrida real declaro `publishable: true` con fuga significativa en test y en
-    val a la vez (P-29). Un campo que se llama "publishable" y no mira el
-    resultado de la auditoria de fuga es peor que no tenerlo, porque invita a
-    saltarse justo la lectura que importa.
+    Devuelve `(bloqueos, salvedades)`. `publishable` es `not bloqueos`.
+
+    La distincion es D-22, y se tomo despues de medir. La version anterior metia
+    todo en una sola lista y `publishable` era `not lista`, asi que la fuga por
+    homologia bloqueaba: con una fuga real y declarada la puerta no se abria
+    nunca y el proyecto no producia ningun numero. Eso no es honestidad, es
+    paralisis, y empuja a lo contrario de lo que se pretendia (retocar
+    parametros hasta que la puerta ceda).
+
+    El criterio:
+
+    - **Bloqueo** cuando el defecto hace que el numero no tenga interpretacion
+      posible, o cuando no se ha medido: el respaldo propio agrupa menos que
+      MMseqs2 y su umbral efectivo es desconocido (P-23), y una auditoria que
+      fallo no dice nada. No se puede declarar lo que no se ha medido.
+    - **Salvedad** cuando el defecto esta **medido y acotado**, y el numero sigue
+      siendo util si se lee sabiendolo: fuga por homologia significativa, con su
+      exceso y su p-valor. Va acompañada de la via publicable para cerrarla
+      (M-01, la curva de rendimiento frente al umbral de identidad).
+
+    Las salvedades no se quedan en la consola: `evaluate` las escribe DENTRO del
+    JSON de metricas y en el pie de las figuras, porque esos archivos viajan
+    solos y un aviso en pantalla no los acompaña (D-18).
     """
-    reasons: list[str] = []
+    bloqueos: list[str] = []
+    salvedades: list[str] = []
+
     if used_method == "builtin":
-        reasons.append(
-            "se uso el respaldo propio en Python, que agrupa menos que MMseqs2 "
-            "(docs/09, P-03, P-23)"
+        bloqueos.append(
+            "se uso el respaldo propio en Python, que agrupa menos que MMseqs2 y "
+            "cuyo umbral efectivo sigue sin medirse (docs/09, P-03, P-23)"
         )
+
     for key in ("train_test_identity_audit", "train_val_identity_audit"):
         audit = report.get(key)
-        if not audit or "error" in audit or "leakage" not in audit:
+        if not audit:
+            bloqueos.append(f"falta la auditoria {key}: no se puede declarar lo que no se midio")
+            continue
+        if "error" in audit:
+            bloqueos.append(f"la auditoria {key} fallo ({audit['error']})")
+            continue
+        if "leakage" not in audit:
             continue
         leak = audit["leakage"]
         if leak.get("significant"):
-            reasons.append(
+            salvedades.append(
                 f"fuga por homologia significativa en "
-                f"{audit['query_split']}-vs-{audit['reference_split']} "
-                f"(exceso {leak['excess']:+.1f} sobre {leak['n_expected_by_chance']} "
-                f"esperadas por azar, p = {leak['global_p_value']:.3g})"
+                f"{audit['query_split']}-vs-{audit['reference_split']}: exceso "
+                f"{leak['excess']:+.1f} sobre {leak['n_expected_by_chance']} marcadas "
+                f"esperadas por azar (p = {leak['global_p_value']:.3g}). Se concentra "
+                f"en peptidos cortos, donde el prefiltro de k-meros de MMseqs2 falla "
+                f"por construccion (docs/09, P-30, P-32). Toda metrica de esta "
+                f"division se lee junto a la curva de umbral de identidad (M-01)."
             )
-    return reasons
+
+    return bloqueos, salvedades
 
 
 def merge_contained_clusters(

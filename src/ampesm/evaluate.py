@@ -28,7 +28,14 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from .config import FIGURES_DIR, METRICS_DIR, SPLITS_PATH, ensure_dirs, load_params
+from .config import (
+    FIGURES_DIR,
+    METRICS_DIR,
+    SPLIT_REPORT_PATH,
+    SPLITS_PATH,
+    ensure_dirs,
+    load_params,
+)
 from .models import PREDICTIONS_DIR
 
 # Metricas que dependen de un umbral y metricas que no. La distincion importa
@@ -307,6 +314,60 @@ def paired_difference(
 # --- Figuras ---------------------------------------------------------------
 
 
+def read_publication_gates() -> dict:
+    """Lee de `split_report.json` lo que impide publicar y lo que hay que declarar.
+
+    D-22 separa las dos cosas y D-18 dice que hacer con cada una, porque la
+    salida de esta etapa son JSON y PNG, archivos que **viajan solos**:
+
+    - **bloqueos** -> abortar. Un numero sin interpretacion posible no se
+      escribe, porque el archivo se acaba publicando y el aviso de consola no va
+      dentro.
+    - **salvedades** -> escribirlas DENTRO del JSON de metricas y en el pie de
+      cada figura. Un `print` no acompaña al archivo; un campo del JSON si.
+
+    Si no hay reporte de split, se aborta: no se puede declarar lo que no se ha
+    medido, y correr `evaluate` sin `split` significa que las predicciones vienen
+    de una division desconocida.
+    """
+    if not SPLIT_REPORT_PATH.exists():
+        raise FileNotFoundError(
+            f"No hay {SPLIT_REPORT_PATH.name}: no se sabe de que division salen estas "
+            "predicciones ni que defectos tiene. Corre 'make split'."
+        )
+    report = json.loads(SPLIT_REPORT_PATH.read_text(encoding="utf-8"))
+    return {
+        "publishable": report.get("publishable", False),
+        "blockers": report.get("publication_blockers", []),
+        "caveats": report.get("publication_caveats", []),
+    }
+
+
+def caveat_footnote(caveats: list[str]) -> str:
+    """Pie corto para las figuras. Vacio si no hay salvedades."""
+    if not caveats:
+        return ""
+    # Se corta por FIN DE FRASE (punto seguido de espacio) y no por punto: las
+    # salvedades llevan cifras como "+10.2" y "p = 8.7e-05", y cortar por punto
+    # truncaba el numero. Lo encontro un test, no una lectura.
+    primeras = [c.split(". ")[0].rstrip(".") + "." for c in caveats]
+    return "Salvedades de la division (detalle en split_report.json):\n" + "\n".join(
+        f"- {frase}" for frase in primeras
+    )
+
+
+def _stamp(fig, footnote: str) -> None:
+    """Escribe las salvedades en el pie de la figura.
+
+    Va en la imagen y no en la consola porque un PNG viaja solo (D-18): acaba en
+    una presentacion o en un README sin el log que lo acompañaba.
+    """
+    if not footnote:
+        return
+    fig.subplots_adjust(bottom=0.22)
+    fig.text(0.01, 0.005, footnote, fontsize=6.5, color="#8a4b00", va="bottom", wrap=True)
+
+
 def _setup_matplotlib():
     import matplotlib
 
@@ -327,7 +388,7 @@ def _setup_matplotlib():
     return plt
 
 
-def plot_curves(results: dict[str, pd.DataFrame]) -> None:
+def plot_curves(results: dict[str, pd.DataFrame], footnote: str = "") -> None:
     """Curvas ROC y precision-recall de todos los modelos."""
     from sklearn.metrics import precision_recall_curve, roc_curve
 
@@ -364,11 +425,12 @@ def plot_curves(results: dict[str, pd.DataFrame]) -> None:
             ax.set_title("Curvas precision-recall en el conjunto de prueba")
 
         ax.legend(fontsize=7, loc="lower right" if kind == "roc" else "lower left")
+        _stamp(fig, footnote)
         fig.savefig(FIGURES_DIR / f"{kind}_curves.png")
         plt.close(fig)
 
 
-def plot_metrics_comparison(summary: pd.DataFrame) -> None:
+def plot_metrics_comparison(summary: pd.DataFrame, footnote: str = "") -> None:
     """Barras con barras de error: el grafico que resume el proyecto."""
     plt = _setup_matplotlib()
     metrics = ["roc_auc", "pr_auc", "mcc", "f1"]
@@ -389,11 +451,14 @@ def plot_metrics_comparison(summary: pd.DataFrame) -> None:
         ax.set_xlim(0, 1)
 
     fig.suptitle("Metricas en prueba con IC 95% (bootstrap por cluster)", y=1.02)
+    _stamp(fig, footnote)
     fig.savefig(FIGURES_DIR / "metrics_comparison.png")
     plt.close(fig)
 
 
-def plot_confusion(results: dict[str, pd.DataFrame], thresholds: dict[str, float]) -> None:
+def plot_confusion(
+    results: dict[str, pd.DataFrame], thresholds: dict[str, float], footnote: str = ""
+) -> None:
     plt = _setup_matplotlib()
     tags = sorted(results)
     cols = min(len(tags), 4)
@@ -426,11 +491,12 @@ def plot_confusion(results: dict[str, pd.DataFrame], thresholds: dict[str, float
     for ax in axes.ravel()[len(tags) :]:
         ax.axis("off")
     fig.suptitle("Matrices de confusion en prueba", y=1.0)
+    _stamp(fig, footnote)
     fig.savefig(FIGURES_DIR / "confusion_matrices.png")
     plt.close(fig)
 
 
-def plot_calibration(results: dict[str, pd.DataFrame]) -> None:
+def plot_calibration(results: dict[str, pd.DataFrame], footnote: str = "") -> None:
     """Curva de calibracion: ¿una probabilidad de 0.8 significa 80%?"""
     from sklearn.calibration import calibration_curve
 
@@ -449,6 +515,7 @@ def plot_calibration(results: dict[str, pd.DataFrame]) -> None:
     ax.set_ylabel("Fraccion real de positivos")
     ax.set_title("Calibracion en el conjunto de prueba")
     ax.legend(fontsize=7)
+    _stamp(fig, footnote)
     fig.savefig(FIGURES_DIR / "calibration.png")
     plt.close(fig)
 
@@ -512,6 +579,24 @@ def evaluate_all() -> pd.DataFrame:
     ci = float(ecfg.get("ci", 0.95))
     threshold_metric = str(ecfg.get("threshold_metric", "mcc"))
 
+    # D-22 + D-18: lo primero, antes de calcular nada. Si algo impide publicar,
+    # esta etapa no debe escribir ni un JSON ni un PNG, porque esos archivos
+    # viajan solos y acaban en un README o en una presentacion sin el log.
+    gates = read_publication_gates()
+    if gates["blockers"]:
+        detalle = "\n  - ".join(gates["blockers"])
+        raise RuntimeError(
+            "La division actual no permite publicar metricas, asi que no se "
+            f"escriben metricas ni figuras:\n  - {detalle}\n"
+            "Corrige la division y vuelve a correr 'make split'."
+        )
+    if gates["caveats"]:
+        print(
+            "[eval] SALVEDADES de la division, van dentro de cada JSON y en el pie de cada figura:"
+        )
+        for c in gates["caveats"]:
+            print(f"[eval]   - {c}")
+
     files = sorted(PREDICTIONS_DIR.glob("*.csv"))
     if not files:
         raise FileNotFoundError(
@@ -573,6 +658,9 @@ def evaluate_all() -> pd.DataFrame:
             "bootstrap_n": n_boot,
             "bootstrap_unit": unit,
             "ci": ci,
+            # La salvedad va DENTRO del archivo (D-18): este JSON se lee solo,
+            # muchas veces meses despues y sin el reporte de split al lado.
+            "split_caveats": gates["caveats"],
         }
         write_json(METRICS_DIR / f"{tag}.json", record)
 
@@ -591,6 +679,21 @@ def evaluate_all() -> pd.DataFrame:
 
     summary = pd.DataFrame(rows).sort_values("mcc", ascending=False).reset_index(drop=True)
     summary.to_csv(METRICS_DIR / "summary.csv", index=False)
+    # Un CSV no tiene donde llevar la salvedad, asi que va en un JSON hermano
+    # con el mismo nombre. Si summary.csv viaja solo, este queda al lado.
+    write_json(
+        METRICS_DIR / "summary_caveats.json",
+        {
+            "publishable": gates["publishable"],
+            "split_caveats": gates["caveats"],
+            "note": (
+                "Toda metrica de summary.csv se lee junto a estas salvedades "
+                "(D-22). Vacio significa que la division no tiene defectos "
+                "medidos pendientes de declarar, no que no se hayan buscado: "
+                "lo que se busco esta en split_report.json."
+            ),
+        },
+    )
 
     # Comparacion emparejada: la pregunta central del proyecto (docs/06).
     #
@@ -619,6 +722,7 @@ def evaluate_all() -> pd.DataFrame:
         comparison["model_a"] = best_emb
         comparison["model_b"] = best_base
         comparison["selected_on"] = selection_basis
+        comparison["split_caveats"] = gates["caveats"]
         comparison["selection_note"] = (
             "Los dos modelos comparados se eligieron SIN mirar test. La tabla "
             "summary.csv con los 13 modelos es descriptiva; la unica inferencia "
@@ -633,9 +737,10 @@ def evaluate_all() -> pd.DataFrame:
         )
         print(f"[eval] {comparison['interpretation']}")
 
-    plot_curves(test_frames)
-    plot_metrics_comparison(summary)
-    plot_confusion(test_frames, thresholds)
-    plot_calibration(test_frames)
+    pie = caveat_footnote(gates["caveats"])
+    plot_curves(test_frames, pie)
+    plot_metrics_comparison(summary, pie)
+    plot_confusion(test_frames, thresholds, pie)
+    plot_calibration(test_frames, pie)
     print(f"\n[eval] metricas en {METRICS_DIR}, figuras en {FIGURES_DIR}")
     return summary

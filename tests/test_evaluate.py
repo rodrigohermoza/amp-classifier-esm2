@@ -14,8 +14,10 @@ from ampesm.evaluate import (
     _select_comparison_pair,
     all_metrics,
     bootstrap_metrics,
+    caveat_footnote,
     choose_threshold,
     paired_difference,
+    read_publication_gates,
     threshold_metrics,
 )
 
@@ -320,3 +322,60 @@ class TestFeaturesHash:
         interpret_mod._check_features_hash(
             "modelo", Params(raw={"features": {"moment_window": 11}})
         )
+
+
+class TestPuertasDePublicacionEnEvaluate:
+    """D-22 + D-18: los bloqueos abortan, las salvedades viajan dentro del archivo.
+
+    El criterio es D-18: la salida de esta etapa son JSON y PNG, archivos que se
+    leen solos, muchas veces sin el log al lado. Un `print` no acompaña al
+    archivo; un campo del JSON y un pie en la figura si.
+    """
+
+    @staticmethod
+    def _report(tmp_path, monkeypatch, *, blockers=(), caveats=()):
+        import ampesm.evaluate as ev
+
+        ruta = tmp_path / "split_report.json"
+        ruta.write_text(
+            json.dumps(
+                {
+                    "publishable": not blockers,
+                    "publication_blockers": list(blockers),
+                    "publication_caveats": list(caveats),
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(ev, "SPLIT_REPORT_PATH", ruta)
+        return ruta
+
+    def test_sin_reporte_de_split_aborta(self, tmp_path, monkeypatch):
+        import ampesm.evaluate as ev
+
+        monkeypatch.setattr(ev, "SPLIT_REPORT_PATH", tmp_path / "no_existe.json")
+        with pytest.raises(FileNotFoundError, match="no se sabe de que division"):
+            read_publication_gates()
+
+    def test_lee_bloqueos_y_salvedades(self, tmp_path, monkeypatch):
+        self._report(tmp_path, monkeypatch, caveats=["fuga en test-vs-train, ver M-01"])
+        puertas = read_publication_gates()
+        assert puertas["publishable"] is True
+        assert puertas["blockers"] == []
+        assert len(puertas["caveats"]) == 1
+
+    def test_un_bloqueo_deja_publishable_en_false(self, tmp_path, monkeypatch):
+        self._report(tmp_path, monkeypatch, blockers=["se uso el respaldo propio"])
+        puertas = read_publication_gates()
+        assert puertas["publishable"] is False
+        assert puertas["blockers"]
+
+    def test_el_pie_de_figura_esta_vacio_si_no_hay_salvedades(self):
+        assert caveat_footnote([]) == ""
+
+    def test_el_pie_de_figura_nombra_el_archivo_donde_esta_el_detalle(self):
+        pie = caveat_footnote(["fuga por homologia en test-vs-train: exceso +10.2. Ver M-01."])
+        assert (
+            "split_report.json" in pie
+        ), "el pie va en un PNG que viaja solo: tiene que decir donde esta el detalle"
+        assert "exceso +10.2" in pie

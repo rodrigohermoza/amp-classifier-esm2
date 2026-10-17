@@ -1315,7 +1315,7 @@ no se contienen entre si, y exige que los tres clusteres acaben siendo uno.
 ---
 
 ## P-32 — La auditoria tira la cobertura, y por eso marca parejas que no son homologas
-**Fecha:** 2026-10-17 · **Estado:** ABIERTO, diagnosticado, arreglo propuesto sin aplicar
+**Fecha:** 2026-10-17 · **Estado:** ARREGLADO en codigo, pendiente de medir en una corrida completa
 
 **Sintoma:** con `--cluster-mode 1` y la fusion por contencion ya puestos, la
 fuga de test bajo a +10.2 (p = 0.025) pero la de val se quedo en +28.2 (p = 0).
@@ -1350,9 +1350,65 @@ obligacion de separar**. No estan midiendo lo mismo, asi que el p-valor de fuga
 no es interpretable como "el agrupamiento fallo": mezcla fallos reales del
 agrupamiento con parejas que quedan fuera de su definicion de homologo.
 
-**Arreglo propuesto (no aplicado):** exigir en la auditoria el mismo
-`min_coverage` que exige el agrupamiento, leido del mismo sitio en `params.yaml`.
-Una pareja solo cuenta si pasa identidad **y** cobertura.
+**Arreglo aplicado, y por que NO es el que estaba escrito aqui.** Lo que decia
+esta entrada era: "exigir en la auditoria el mismo `min_coverage` que exige el
+agrupamiento". Al medirlo antes de implementarlo resulto que **eso no quitaba ni
+uno** de los casos que lo motivaron, porque la cobertura que ya calculaba la
+auditoria se normaliza por la secuencia **corta**:
+
+| pareja | identidad | cobertura /corta | cobertura /larga |
+|---|---|---|---|
+| 30 vs 5 (`CCISG`) | 1.000 | **1.000** | 0.167 |
+| 31 vs 5 (`VTPFL`) | 1.000 | **1.000** | 0.161 |
+| 29 vs 29, homologas | 1.000 | 1.000 | 1.000 |
+| 20 vs 20, homologas | 0.950 | 1.000 | 1.000 |
+
+Exigir 0.5 a la columna de la corta no cambia nada: los falsos positivos valen
+1.000 ahi. La columna que discrimina es la de la larga, que ademas es la que mide
+MMseqs2 (ver P-35), y las homologas de verdad valen 1.000 en las dos, asi que el
+filtro correcto no ciega lo que si hay que detectar.
+
+El arreglo real es por tanto: cobertura **sobre la secuencia larga** >=
+`min_coverage`, leido del mismo sitio en `params.yaml` que el agrupamiento.
+
+**Y un segundo termino, que aparecio al correr los tests.** El filtro de
+cobertura rompia la regresion de P-14, que exige que la auditoria encuentre un
+fragmento de 8 residuos contenido en uno de 50 (cobertura 0.16). La pregunta no
+era si el test estorbaba, sino si la auditoria debe seguir viendo ese caso, y la
+respuesta es si: esa clase de redundancia la tapa **D-20**, que es el mecanismo
+mas joven del proyecto y el que ya fallo dos veces (P-31, P-31b). Si la auditoria
+filtra por cobertura a secas, deja de poder ver un fallo de D-20.
+
+La condicion es entonces una **O**, con cada termino vigilando una garantia
+distinta:
+
+```python
+contenida = otra in query or query in otra
+if cov_larga < min_coverage and not contenida:
+    continue
+```
+
+- cobertura sobre la larga -> la garantia de MMseqs2 (`-c 0.5 --cov-mode 1`);
+- contencion exacta -> la garantia de D-20.
+
+`min_coverage` se quedo **sin valor por defecto** en `_max_identity_against` y en
+`audit_train_test_identity`: es el parametro del que depende el significado del
+p-valor, y P-29 enseno que un defecto se comporta como una decision del proyecto
+aunque nadie la haya tomado. Quien audite declara que definicion usa, o no
+arranca. Hay un test que lo fija leyendo la firma con `inspect`.
+
+**Como se valido** (D-15, ejecutando la version mala): se pusieron los dos pares
+reales como tests y se corrieron contra la version sin filtro:
+
+```
+version SIN filtro: 2 failed, 5 passed
+  AssertionError: VTPFL (5 residuos) contra 31 da cobertura 0.16 sobre la larga
+version CON filtro: 7 passed
+```
+
+Los otros cinco pasan en las dos versiones a proposito: no discriminan este
+cambio, vigilan que el filtro no se lleve por delante las homologas de longitud
+parecida ni las subcadenas exactas.
 
 **Por que esto NO es la trampa que rechaza D-20:** D-20 rechaza que la guarda use
 la misma **regla** que lo vigilado, es decir el mismo alineador, porque entonces
@@ -1478,6 +1534,52 @@ P-33 por otra via: el entorno de desarrollo acumula estado que el repositorio no
 declara. Y el procedimiento sirve para la proxima: `PATH` recortado con enlaces
 solo a lo imprescindible, `env -i` para no heredar nada, y correr la suite
 entera, no solo el test que fallo.
+
+---
+
+## P-35 — El codigo documentaba al reves lo que hace `--cov-mode 1`
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO
+
+**Sintoma:** ninguno visible. Lo encontre al buscar la definicion de cobertura
+del agrupamiento para arreglar P-32. El docstring de `cluster_mmseqs2` decia:
+
+> `--cov-mode 1` mide la cobertura respecto a la secuencia mas corta, que es lo
+> que interesa al mezclar peptidos de 5 y de 50 residuos: con el modo por
+> defecto, un peptido corto nunca alcanzaria la cobertura exigida frente a uno
+> largo y quedaria en su propio cluster, perdiendo la agrupacion.
+
+**Causa:** es falso. En MMseqs2, `--cov-mode 1` es la cobertura respecto al
+**objetivo**, que en el agrupamiento es el representante, es decir la larga. El
+modo que mide respecto a la corta es el 5. Medido con un FASTA de tres
+secuencias, no deducido de la documentacion:
+
+```
+larga            GIPCGESCVWIPCISGAIGCSCKSKVCYRN   30 residuos
+corta_subcadena  IPCISGAIGC                       subcadena exacta de la anterior
+parecida_larga   GIPCGESCVWIPCISGAIGCSCKSKVCYRS   un residuo distinto
+
+--cluster-mode 1 -c 0.5 --cov-mode 1:
+  rep=corta_subcadena  miembro=corta_subcadena      <- sola
+  rep=parecida_larga   miembro=parecida_larga
+  rep=parecida_larga   miembro=larga
+```
+
+La subcadena exacta queda en su propio cluster, que es justo lo que el docstring
+afirmaba que este modo evita. (`--cov-mode 5` da el mismo resultado en este caso,
+asi que la correccion no es cambiar de modo.)
+
+**Resolucion:** reescrito el docstring con la medicion dentro, y dicho de forma
+explicita que la definicion efectiva de homologo del agrupamiento es identidad
+>= umbral **y** cobertura sobre la larga, y que las subcadenas cortas las tapa
+aparte D-20.
+
+**Leccion:** la peor documentacion no es la que falta, es la que afirma lo
+contrario de lo que pasa, porque se usa para decidir. Esta frase llevaba semanas
+ahi y la lei como premisa al arreglar P-32: si no la hubiera comprobado, el
+arreglo habria salido con la definicion equivocada. Un comentario que explica
+*por que* un parametro vale lo que vale es una afirmacion sobre el
+comportamiento de una herramienta, y se comprueba como cualquier otra, con una
+medicion y no leyendo el manual de memoria.
 
 ---
 

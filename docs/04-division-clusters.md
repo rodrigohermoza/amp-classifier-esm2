@@ -55,8 +55,21 @@ mmseqs easy-cluster entrada.fasta prefijo tmp --min-seq-id 0.4 -c 0.5 --cov-mode
 
 Rapido y es el estandar actual. Se instala con `brew install mmseqs2`
 (~30 MB). `-c 0.5 --cov-mode 1` exige que el alineamiento cubra al menos la
-mitad de la secuencia mas corta, lo que importa cuando se mezclan peptidos de 5 y
-de 50 residuos.
+mitad del **objetivo**, que al agrupar es el representante, es decir la
+secuencia larga. Esta pagina y el codigo decian "de la mas corta", y es falso;
+comprobado con una medicion en P-35.
+
+La consecuencia importa, porque define que promete este agrupamiento:
+
+> **homologas** = identidad >= 0.4 **y** alineamiento que cubra >= 50% de la
+> secuencia larga.
+
+Una subcadena corta dentro de una larga (5 residuos dentro de 30, cobertura
+0.17) **no** cumple esa definicion y MMseqs2 la deja en su propio cluster. Eso no
+es un descuido que haya que corregir subiendo la cobertura: es lo que hace que el
+umbral de identidad signifique algo en peptidos cortos. Esa clase de redundancia
+se tapa aparte, con la fusion por contencion (D-20), y la auditoria de fuga la
+vigila con un termino propio (P-32).
 
 **`--cluster-mode 1` es obligatorio y no es el valor por defecto** (P-29). Los
 tres modos dan garantias distintas, y solo una sirve aqui:
@@ -176,6 +189,26 @@ tenian identidad >= 0.4 contra train, lo que leido tal cual significaria que
 todo el metodo no sirve. Es falso: **la identidad de secuencia tiene un ruido
 de fondo alto en peptidos cortos**. Con alineamiento global y huecos
 permitidos, dos peptidos sin ninguna relacion alinean al 0.33 de media.
+
+### La auditoria usa la misma definicion de homologo que el agrupamiento
+
+Una pareja solo cuenta como fuga si cumple **una** de estas dos cosas (P-32):
+
+1. identidad >= umbral **y** cobertura >= `min_coverage` sobre la larga, que es
+   la garantia de MMseqs2; o
+2. la corta es **subcadena exacta** de la larga, que es la garantia de D-20.
+
+Cada termino vigila un mecanismo distinto, y por eso son dos y no uno. Durante
+cuatro corridas la auditoria no exigio cobertura ninguna, y eso le hacia marcar
+parejas que el agrupamiento nunca tuvo la obligacion de separar: `CCISG`, cinco
+residuos, da identidad 1.000 contra cualquier peptido rico en cisteina porque un
+alineador global con huecos los encuentra dispersos. Con 536 secuencias de 5 a 7
+residuos en el conjunto, eso contaminaba el p-valor de fuga, y mas a val que a
+test.
+
+`min_coverage` se lee del mismo sitio de `params.yaml` que lo usa el
+agrupamiento, y queda escrito en `split_report.json`: el p-valor de fuga solo se
+puede interpretar sabiendo con que definicion se midio.
 
 El control es **por secuencia**: cada peptido de test se baraja 20 veces, lo
 que conserva su longitud y su composicion exactas (que es lo que determina su

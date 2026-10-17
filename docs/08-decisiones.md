@@ -461,3 +461,62 @@ en lugar de en una afirmacion de limpieza.
 
 **Relacionado:** P-30, P-31 (el bug que introdujo la implementacion), D-15,
 M-01.
+
+---
+
+## D-21 — La auditoria de fuga comparte la definicion de homologo, y la vigila con dos terminos
+
+**Fecha:** 2026-10-17
+
+**Decision.** Una pareja cuenta como fuga si cumple **una** de estas dos cosas:
+
+1. identidad >= `identity_threshold` **y** cobertura >= `min_coverage` medida
+   **sobre la secuencia larga**;
+2. la corta es **subcadena exacta** de la larga.
+
+Los dos valores se leen del mismo sitio de `params.yaml` del que los lee el
+agrupamiento, y quedan escritos en `split_report.json`.
+
+**Por que compartir la definicion es obligatorio y compartir el alineador no.**
+D-20 rechaza que la guarda use la misma **regla** que lo vigilado: si la
+auditoria alineara con MMseqs2, no podria ver los puntos ciegos de MMseqs2, que
+es justo lo que tiene que ver. Pero eso es la regla, no la **definicion**. Si el
+agrupamiento promete separar lo que supera identidad *y* cobertura, y la
+auditoria mide solo identidad, entonces la auditoria no esta comprobando la
+promesa: esta midiendo otra cosa y llamandola fuga. Durante cuatro corridas
+marco parejas como `CCISG` (cinco residuos, identidad 1.000 por aritmetica,
+cobertura 0.167) que el agrupamiento nunca tuvo la obligacion de separar. Los
+alineadores siguen siendo distintos; lo que se iguala es que se considera
+homologo.
+
+**Por que son dos terminos y no uno.** El proyecto tiene **dos** mecanismos que
+prometen cosas distintas, y una guarda con un solo termino solo vigila uno:
+
+| mecanismo | que promete | que termino lo vigila |
+|---|---|---|
+| MMseqs2 `-c 0.5 --cov-mode 1` | nada por encima de identidad y cobertura cruza | cobertura sobre la larga |
+| Fusion por contencion (D-20) | ninguna subcadena exacta cruza | contencion exacta |
+
+Si se auditara solo por cobertura, un fragmento de 8 residuos dentro de uno de
+50 (cobertura 0.16) dejaria de marcarse, y la auditoria quedaria ciega
+precisamente ante el mecanismo mas joven del proyecto, escrito el mismo dia y
+que ya fallo dos veces (P-31, P-31b). La regla general que deja esta decision:
+**cada garantia que el proyecto afirma necesita un termino propio en la guarda**,
+porque una guarda no vigila lo que no mide.
+
+Esto se descubrio porque el filtro de cobertura rompio la regresion de P-14, que
+exige encontrar ese fragmento corto. La tentacion era borrar el test por
+estorbar; lo correcto era preguntar que garantia estaba defendiendo.
+
+**`min_coverage` no tiene valor por defecto.** Es el parametro del que depende el
+significado del p-valor de fuga, y P-29 ya mostro que un defecto se comporta como
+una decision del proyecto aunque nadie la haya tomado. Quien llame a la auditoria
+declara que definicion usa, o no arranca. Hay un test que lo fija leyendo la
+firma con `inspect`.
+
+**Lo que esta decision acepta:** el p-valor de las cuatro corridas anteriores
+**no es comparable** con el de las siguientes. No median lo mismo. La tabla de
+`docs/14` lo marca con una linea divisoria en vez de dar a entender una tendencia.
+
+**Relacionado:** P-32, P-35 (el docstring que describia al reves `--cov-mode 1`),
+D-20, P-14, P-29, P-31, P-31b, D-15, M-01.

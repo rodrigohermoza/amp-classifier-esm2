@@ -158,8 +158,13 @@ disponible y el metodo real se registra en el reporte:
    mmseqs easy-cluster in.fasta pref tmp --min-seq-id 0.4 -c 0.5 --cov-mode 1
                                          -s 7.5 --alignment-mode 3
    ```
-   `--cov-mode 1` exige cobertura sobre la secuencia **mas corta**, que es lo
-   correcto al mezclar peptidos de 5 y 50 residuos. `-s 7.5` sube la
+   `--cov-mode 1` exige cobertura sobre el **objetivo**, que al agrupar es el
+   representante, es decir la secuencia **larga**. Esta linea decia "sobre la
+   mas corta" y era falso (P-35, con la medicion). La consecuencia es la
+   definicion efectiva de homologo de este proyecto: identidad >= 0.4 **y**
+   cobertura >= 0.5 sobre la larga. Una subcadena corta dentro de una larga no
+   la cumple y MMseqs2 la deja aparte; eso lo tapa la fusion por contencion
+   (D-20) y lo vigila la auditoria con un termino propio (D-21). `-s 7.5` sube la
    sensibilidad del prefiltro y `--alignment-mode 3` fuerza alineamiento
    completo: los dos son necesarios porque los valores por defecto estan
    ajustados a proteinas, no a peptidos cortos.
@@ -187,6 +192,13 @@ disponible y el metodo real se registra en el reporte:
 
 La identidad se calcula con `Bio.Align.PairwiseAligner` en modo global con
 BLOSUM62, y se define como `residuos identicos / longitud de la mas corta`.
+
+La **cobertura** se calcula de dos formas a proposito, y confundirlas fue P-32:
+sobre la mas corta (`columnas alineadas / longitud de la corta`), que es la que
+usa el respaldo propio para no castigar al peptido corto contenido en uno largo,
+y sobre la mas larga, que es la de MMseqs2 y por tanto la que define que parejas
+el agrupamiento se comprometio a separar. La auditoria de fuga usa la segunda.
+Para las parejas que marcaba de mas, la primera vale 1.000 y la segunda 0.167.
 
 ### Asignacion de clusteres a splits
 

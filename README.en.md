@@ -4,7 +4,8 @@
 
 An antimicrobial peptide classifier (AMP vs non-AMP) that compares protein
 language model embeddings (ESM-2) against physicochemical descriptors, using
-sequence-identity cluster splits to prevent data leakage.
+sequence-identity cluster splits with the **residual leakage measured and
+declared** rather than assumed away.
 
 > **Status: dataset built, models not yet run.**
 > `make data` has run against the real sources: 18,644 peptides. The results
@@ -30,12 +31,31 @@ machine learning is my work end to end.
 The goal is not a high ROC-AUC. In this task it is easy to reach 0.95+ while
 having learned nothing about antimicrobial activity. What it tries to get right:
 
-**1. A split with no data leakage.** AMPs come in families of near-identical
-sequences: magainin 1 and 2 differ by two residues. A random split puts close
-relatives in both train and test, and then the metric measures memorisation.
-Here all sequences are clustered at 40% identity and **whole clusters** are
-assigned to train/val/test. This is the core of the project and, in my view, the
-most common methodological error in the AMP prediction literature.
+**1. A cluster split with the leakage measured, not assumed.** AMPs come in
+families of near-identical sequences: magainin 1 and 2 differ by two residues. A
+random split puts close relatives in both train and test, and then the metric
+measures memorisation. Here all sequences are clustered at 40% identity and
+**whole clusters** are assigned to train/val/test.
+
+And here is what actually sets this repository apart: **clustering is not
+enough, and the project demonstrates this on itself.** An independent audit
+measures each test sequence's maximum identity against *all* of train, against a
+shuffling null, and finds significant residual leakage: an excess of +68 flagged
+sequences over the 24 expected by chance in test, +62 in validation. It
+concentrates in peptides under 15 residues, where MMseqs2's k-mer prefilter
+fails by construction. Between 74% and 86% of what is flagged has identity
+>= 0.60 with a relative in train.
+
+That number is **not hidden or rounded down**: it is written inside every
+metrics JSON and in the footer of every figure, so it cannot be separated from
+the result ([D-22](docs/08-decisiones.md), Spanish). What gets published is not
+"clean metrics", it is metrics with their measured defect alongside, and the
+performance-versus-identity-threshold curve
+([M-01](docs/10-mejoras-futuras.md), Spanish) quantifies how much it matters.
+
+The AMP prediction literature routinely reports "leakage-free" splits with no
+instrument that checks the claim. What distinguishes this project is not having
+less leakage: it is having the number.
 
 **2. Honest baselines.** Antimicrobial activity depends mostly on two global
 properties: net positive charge and a hydrophobic face. That makes 30

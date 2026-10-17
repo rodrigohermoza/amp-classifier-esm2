@@ -54,6 +54,18 @@ def tool_version(cmd: list[str]) -> str | None:
 # --- Metodo 1: MMseqs2 -----------------------------------------------------
 
 
+def cluster_ids_from_pairs(pares: list[tuple[str, str]]) -> dict[str, int]:
+    """Convierte pares (representante, miembro) en id -> numero de cluster.
+
+    El numero sale del representante **ordenado alfabeticamente**, no del orden
+    en que aparecen los pares. Es una funcion aparte precisamente para poder
+    fijarlo con un test sin necesitar MMseqs2 instalado (P-36, y la leccion de
+    P-34).
+    """
+    rep_to_id = {rep: i for i, rep in enumerate(sorted({rep for rep, _ in pares}))}
+    return {member: rep_to_id[rep] for rep, member in pares}
+
+
 def cluster_mmseqs2(
     sequences: dict[str, str], identity: float, coverage: float
 ) -> dict[str, int] | None:
@@ -140,17 +152,26 @@ def cluster_mmseqs2(
             return None
 
         # Formato: representante<TAB>miembro, una linea por miembro.
-        rep_to_id: dict[str, int] = {}
-        mapping: dict[str, int] = {}
+        #
+        # Los ids se asignan por representante ORDENADO, no por orden de
+        # aparicion en el archivo (P-36). MMseqs2 escribe las filas en un orden
+        # que cambia de una corrida a otra —es multihilo— aunque la particion
+        # sea identica: comprobado corriendolo dos veces sobre el mismo FASTA,
+        # los TSV difieren byte a byte y ordenados coinciden en las 18 644
+        # filas, 0 diferencias. Con `len(rep_to_id)` eso daba la misma
+        # particion con ETIQUETAS distintas, y `assign_splits` baraja con
+        # semilla fija a partir del orden de los ids, asi que las etiquetas
+        # decidian la division: dos corridas identicas daban train/val/test
+        # distintos y el exceso de fuga se movia de +68.2 a +75.2.
+        pares: list[tuple[str, str]] = []
         with open(tsv, encoding="utf-8") as fh:
             for line in fh:
                 parts = line.rstrip("\n").split("\t")
                 if len(parts) != 2:
                     continue
-                rep, member = parts
-                if rep not in rep_to_id:
-                    rep_to_id[rep] = len(rep_to_id)
-                mapping[member] = rep_to_id[rep]
+                pares.append((parts[0], parts[1]))
+
+        mapping = cluster_ids_from_pairs(pares)
 
     missing = set(sequences) - set(mapping)
     if missing:

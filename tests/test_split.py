@@ -18,6 +18,7 @@ from ampesm.split import (
     assign_splits,
     audit_train_test_identity,
     cluster_builtin,
+    cluster_ids_from_pairs,
     cluster_mmseqs2,
     kmer_set,
     merge_contained_clusters,
@@ -888,3 +889,53 @@ class TestAuditoriaExigeCobertura:
 
         firma = inspect.signature(audit_train_test_identity)
         assert firma.parameters["min_coverage"].default is inspect.Parameter.empty
+
+
+class TestIdsDeClusterDeterministas:
+    """P-36: MMseqs2 escribe las filas en un orden que cambia entre corridas.
+
+    Comprobado corriendolo dos veces sobre el mismo FASTA de 18 644 secuencias:
+    los dos TSV difieren byte a byte y, ordenados, coinciden en las 18 644 filas
+    sin una sola diferencia. Misma particion, orden de filas distinto.
+
+    Asignar los ids por orden de aparicion convertia eso en divisiones
+    distintas, porque `assign_splits` baraja con semilla fija partiendo del
+    orden de los ids. Medido pasando los dos TSV reales por la cadena entera:
+    **6 531 de 18 644 secuencias (35%) cambiaban de split** entre dos corridas
+    identicas. Con ids canonicos, cero.
+    """
+
+    PARES = [
+        ("rep_b", "seq_1"),
+        ("rep_b", "seq_2"),
+        ("rep_a", "seq_3"),
+        ("rep_c", "seq_4"),
+    ]
+
+    def test_el_orden_de_las_filas_no_cambia_ni_una_etiqueta(self):
+        directo = cluster_ids_from_pairs(self.PARES)
+        invertido = cluster_ids_from_pairs(list(reversed(self.PARES)))
+        assert directo == invertido, (
+            "mismas parejas en otro orden dan otras etiquetas: eso basta para "
+            "que la division entera cambie (P-36)"
+        )
+
+    def test_el_id_sale_del_representante_ordenado(self):
+        ids = cluster_ids_from_pairs(self.PARES)
+        # rep_a < rep_b < rep_c alfabeticamente, asi que 0, 1, 2.
+        assert ids["seq_3"] == 0
+        assert ids["seq_1"] == ids["seq_2"] == 1
+        assert ids["seq_4"] == 2
+
+    def test_todas_las_permutaciones_dan_lo_mismo(self):
+        import itertools
+
+        esperado = cluster_ids_from_pairs(self.PARES)
+        for perm in itertools.permutations(self.PARES):
+            assert cluster_ids_from_pairs(list(perm)) == esperado
+
+    def test_la_particion_se_conserva(self):
+        """Lo que no debe cambiar el arreglo: quien va con quien."""
+        ids = cluster_ids_from_pairs(self.PARES)
+        assert ids["seq_1"] == ids["seq_2"], "seq_1 y seq_2 comparten representante"
+        assert len(set(ids.values())) == 3

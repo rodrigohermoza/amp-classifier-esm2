@@ -520,3 +520,63 @@ firma con `inspect`.
 
 **Relacionado:** P-32, P-35 (el docstring que describia al reves `--cov-mode 1`),
 D-20, P-14, P-29, P-31, P-31b, D-15, M-01.
+
+---
+
+## D-22 — La puerta impide publicar en silencio, no publicar
+
+**Fecha:** 2026-10-17
+
+**Decision.** `split_report.json` lleva dos listas, no una:
+
+- **`publication_blockers`** — defectos que hacen que el numero **no tenga
+  interpretacion posible**, o que no se haya medido. `publishable` es
+  `not blockers`. Hoy: haber usado el respaldo propio en Python, cuyo umbral
+  efectivo sigue sin medirse (P-23), y una auditoria que falto o fallo.
+- **`publication_caveats`** — defectos **medidos y acotados** que no impiden
+  publicar pero tienen que ir escritos al lado de cada numero. Hoy: la fuga por
+  homologia, con su exceso, su p-valor y la via publicable para cerrarla (M-01).
+
+Y lo que hace que esto no sea cosmetica: `evaluate` **aborta** si hay bloqueos, y
+si hay salvedades las escribe **dentro** de cada JSON de metricas, en un
+`summary_caveats.json` hermano de `summary.csv` (un CSV no tiene donde llevarlas)
+y en el **pie de cada figura**. El criterio es D-18: la salida de esa etapa son
+archivos que viajan solos, y un aviso de consola no los acompaña a la
+presentacion ni al README.
+
+**Por que se cambio.** La version anterior metia todo en una lista y
+`publishable` era `not lista`, asi que una fuga significativa bloqueaba. Al
+arreglar la medicion (P-32) la fuga resulto ser **real y grande**: entre el 74% y
+el 86% de las secuencias marcadas tienen identidad >= 0.60 con un pariente en
+train, y casi la mitad >= 0.80. Con la puerta anterior, el resultado honesto —
+fuga real, medida y declarada — dejaba el proyecto sin producir **ningun**
+numero, para siempre. Eso no es honestidad: es paralisis, y empuja justo a lo
+contrario de lo que la puerta pretendia, a retocar parametros hasta que ceda.
+
+**El criterio general que deja esta decision.** Una guarda que solo sabe decir
+"no" acaba desactivada o burlada. La guarda util distingue *no se puede
+interpretar* de *se puede interpretar sabiendo esto*, y en el segundo caso su
+trabajo no es bloquear sino **pegar el defecto al numero** de forma que no se
+puedan separar. Lo que se publica no es "metricas limpias", es "metricas con su
+defecto medido al lado".
+
+**La alternativa que se descarto como resultado principal.** Extender la fusion
+de clusteres a las parejas cortas que MMseqs2 no ve (fuerza bruta, 25 millones
+de alineamientos, ~13 min medidos) bajaria la fuga declarada. Se descarta como
+*resultado* y se admite solo como *analisis de sensibilidad etiquetado*, porque
+esa fusion usaria Biopython por fuerza bruta y la auditoria usa Biopython con
+prefiltro: la guarda seria una version mas debil del mecanismo que vigila y daria
+verde por construccion. Es la trampa de D-20 por el otro lado —no compartir la
+definicion de homologo, que es obligatorio, sino compartir la **regla**, que
+ciega— y aqui no hay salida limpia, porque no existe una segunda herramienta
+rapida que vea peptidos de 8 residuos. Pasariamos de "fuga medida y declarada" a
+"fuga eliminada por construccion, sin comprobacion independiente en la clase
+donde estaba el problema". Eso es mejor numero, no mejor metodo.
+
+Dicho de la forma que lo deja claro: el proyecto de 2023 publico numeros sin
+guarda **sin saberlo**; hacer esa fusion y presentarla como resultado seria
+publicar numeros sin guarda **sabiendolo**, que es peor.
+
+**Relacionado:** P-29 (el campo que mentia), P-32 (la medicion que cambio el
+cuadro), P-23, D-11, D-18 (abortar o avisar), D-20 (compartir regla ciega la
+guarda), M-01.

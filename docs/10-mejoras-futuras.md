@@ -26,6 +26,32 @@ longitud** (ajustar una regresion de la dimension sobre la longitud y quedarse
 con el residuo) antes de entrenar. Esfuerzo bajo, y convierte una advertencia
 escrita en un numero. Tiene sentido hacerla junto con M-01.
 
+## Lo primero despues de tener resultados
+
+### M-01 es ahora obligatoria, no opcional
+
+La division en uso tiene **fuga por homologia real y declarada** (D-22), y la
+salvedad que viaja con cada metrica remite a esta curva. Ya no es "la figura mas
+instructiva del proyecto": es la forma en que el proyecto cierra su propio
+defecto principal. Coste medido: `split` son ~12 min por umbral y los embeddings
+**no** hay que recalcularlos (dependen solo de las secuencias, no de la
+division), asi que son cinco corridas de split + entrenamiento + evaluacion.
+
+### M-07 — Fusionar las parejas cortas que MMseqs2 no ve (solo como sensibilidad)
+
+Fuerza bruta sobre las parejas con `min(longitud) < 15` y razon de longitudes
+>= 0.5: **25 124 791** parejas, ~13 min medidos a 33 000 alineamientos/s. Fusiona
+los clusteres de las que pasen identidad >= 0.4 y cobertura >= 0.5. Cerraria el
+punto ciego que deja el prefiltro de k-meros de MMseqs2 en peptidos de 8-14
+residuos, que es donde se concentra la fuga que queda.
+
+**No puede ser el resultado principal, y el motivo esta en D-22:** esa fusion
+mide con Biopython por fuerza bruta y la auditoria mide con Biopython con
+prefiltro, asi que la guarda seria una version mas debil de lo vigilado y daria
+verde por construccion. Si se hace, va **etiquetada** como analisis de
+sensibilidad: "metricas con la redundancia corta eliminada por nuestra propia
+regla, sin comprobacion independiente en esa clase". Informa; no certifica.
+
 ## Alto valor, bajo esfuerzo
 
 ### M-01 — Curva de rendimiento frente al umbral de identidad

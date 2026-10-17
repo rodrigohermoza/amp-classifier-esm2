@@ -1583,6 +1583,75 @@ medicion y no leyendo el manual de memoria.
 
 ---
 
+## P-36 — Dos corridas identicas de `split` daban divisiones distintas
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO
+
+**Sintoma:** se relanzo `split` sin cambiar nada del agrupamiento —solo los
+campos nuevos del informe (D-22)— y el numero principal se movio:
+
+```
+corrida 5:  test +68.2   val +62.2   7153 clusteres
+corrida 6:  test +75.2   val +66.2   7153 clusteres
+```
+
+Mismo codigo de agrupamiento, misma semilla, mismos datos, mismo numero de
+clusteres, numeros distintos. En un proyecto cuyo argumento es el rigor
+metodologico esto es mas grave que la fuga que estaba midiendo.
+
+**Causa, en tres pasos medidos y no supuestos:**
+
+1. **MMseqs2 es reproducible en la particion y no en el orden de las filas.** Se
+   corrio dos veces sobre el mismo FASTA de 18 644 secuencias: los dos
+   `_cluster.tsv` **difieren byte a byte**, y ordenados coinciden en las 18 644
+   filas con **0 diferencias**. Misma particion, mismos representantes, otro
+   orden. Es multihilo.
+
+2. **Los ids de cluster se asignaban por orden de aparicion:**
+
+   ```python
+   if rep not in rep_to_id:
+       rep_to_id[rep] = len(rep_to_id)
+   ```
+
+   asi que el mismo agrupamiento recibia **etiquetas distintas** en cada corrida.
+
+3. **`assign_splits` depende de las etiquetas.** Construye la lista de clusteres
+   en orden de id, la **baraja con semilla fija** y luego ordena por tamano de
+   forma estable. Con otras etiquetas, el barajado coloca otros clusteres en
+   otras posiciones y los empates de tamano —que son casi todos: 5 615 clusteres
+   de un solo miembro— se rompen distinto.
+
+**Cuanto cambiaba.** Se pasaron los dos TSV reales por la cadena completa
+(parseo, fusion por contencion, asignacion):
+
+```
+ids por orden de aparicion: divisiones identicas = False   cambian de split: 6531
+ids canonicos             : divisiones identicas = True    cambian de split: 0
+```
+
+**6 531 de 18 644 secuencias, el 35%, cambiaban de split entre dos corridas
+identicas.** Ningun numero producido por `split` hasta aqui era reproducible, y
+eso incluye la tabla de evolucion de la fuga de `docs/14`: parte de esa
+"tendencia" era ruido de reasignacion.
+
+**Resolucion:** `cluster_ids_from_pairs`, funcion aparte y pura, que numera por
+representante **ordenado alfabeticamente**. Es funcion aparte para poder fijarla
+con un test sin MMseqs2 instalado, que es la leccion de P-34.
+
+**Leccion.** Es la tercera vez en este repositorio que el defecto no esta en el
+calculo sino en el **orden**: P-14 (un `break` que dependia de una cota mal
+puesta), P-31 (orden de iteracion de un `set`) y esta. El patron comun es tratar
+un orden como si fuera un detalle de presentacion cuando alguien aguas abajo lo
+usa para decidir. La pregunta que lo detecta: *¿alguien lee esto en orden, y ese
+orden cambia algo?* Aqui el lector era `rng.shuffle` tres funciones mas abajo.
+
+Y la segunda, sobre como aparecio: se encontro porque **se relanzo algo que no
+tenia por que cambiar y se comparo el resultado**. No lo encontro ningun test ni
+ninguna lectura del codigo; lo encontro notar que dos numeros que debian ser
+iguales no lo eran. Conviene relanzar a proposito de vez en cuando.
+
+---
+
 ## Plantilla para entradas nuevas
 
 ```

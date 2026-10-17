@@ -4,8 +4,8 @@
 
 Clasificador de péptidos antimicrobianos (AMP vs no-AMP) que compara embeddings
 de un modelo de lenguaje de proteínas (ESM-2) contra descriptores
-fisicoquímicos, con división de datos por clústeres de identidad de secuencia
-para evitar fuga de información.
+fisicoquímicos, con división de datos por clústeres de identidad de secuencia y
+**la fuga residual medida y declarada** en lugar de dada por eliminada.
 
 > **Estado: datos construidos, modelos pendientes de ejecución.**
 > `make data` ya corrió contra las fuentes reales: 18 644 péptidos. Las tablas
@@ -32,13 +32,32 @@ El objetivo no es un ROC-AUC alto. En esta tarea es fácil llegar a 0.95+ y no
 haber aprendido nada sobre actividad antimicrobiana. Lo que se intenta hacer bien
 es:
 
-**1. Una división de datos sin fuga de información.** Los AMPs vienen en
-familias de secuencias casi idénticas: la magainina 1 y la 2 difieren en dos
-residuos. Una división aleatoria pone parientes cercanos en entrenamiento y en
-prueba, y entonces la métrica mide memorización. Aquí se agrupan todas las
+**1. Una división por clústeres con la fuga medida, no supuesta.** Los AMPs
+vienen en familias de secuencias casi idénticas: la magainina 1 y la 2 difieren
+en dos residuos. Una división aleatoria pone parientes cercanos en entrenamiento
+y en prueba, y entonces la métrica mide memorización. Aquí se agrupan todas las
 secuencias al 40% de identidad y se asignan **clústeres completos** a
-train/val/test. Es la pieza central del proyecto y, en mi opinión, el error
-metodológico más común en la literatura de predicción de AMPs.
+train/val/test.
+
+Y aquí está lo que de verdad distingue a este repositorio: **agrupar no basta, y
+el proyecto lo demuestra sobre sí mismo.** Una auditoría independiente mide la
+identidad máxima de cada secuencia de prueba contra *todo* entrenamiento, contra
+un nulo por barajado, y encuentra fuga residual significativa: exceso de +68
+secuencias marcadas sobre las 24 esperadas por azar en test, +62 en validación.
+Se concentra en péptidos de menos de 15 residuos, donde el prefiltro de k-meros
+de MMseqs2 falla por construcción. Entre el 74% y el 86% de lo marcado tiene
+identidad ≥ 0,60 con un pariente en entrenamiento.
+
+Ese número **no está escondido ni redondeado hacia abajo**: va dentro de cada
+JSON de métricas y en el pie de cada figura, para que no se pueda separar del
+resultado ([D-22](docs/08-decisiones.md)). Lo que se publica no es "métricas
+limpias", es métricas con su defecto medido al lado, y la curva de rendimiento
+frente al umbral de identidad ([M-01](docs/10-mejoras-futuras.md)) cuantifica
+cuánto importa.
+
+La literatura de predicción de AMPs reporta de forma habitual divisiones
+"sin fuga" sin ningún instrumento que lo compruebe. La diferencia de este
+proyecto no es tener menos fuga: es tener el número.
 
 **2. Baselines honestos.** La actividad antimicrobiana depende sobre todo de dos
 propiedades globales: carga positiva neta y una cara hidrofóbica. Eso hace que 30

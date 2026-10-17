@@ -1,5 +1,20 @@
 .PHONY: help setup lint test check-env data split baselines embeddings train evaluate interpret all clean clean-data
 
+# P-28: el entorno virtual vive FUERA del proyecto a proposito. El proyecto esta
+# en ~/Desktop, iCloud sincroniza esa carpeta, y ante un conflicto iCloud no
+# fusiona: conserva las dos copias y renombra una a "nombre 2.py". Un venv son
+# ~14 000 archivos que Python localiza por nombre exacto, asi que basta ese
+# renombrado para dejarlo inservible sin borrar nada. Llego a 4 785 archivos
+# duplicados, entre ellos todos los de pytest y las cuatro copias del .pth del
+# instalable editable.
+#
+# Esa era la causa real de P-13 y P-25, que reaparecieron cinco veces porque se
+# trataba el sintoma (reinstalar) y no la causa. Mientras el venv estuviera bajo
+# ~/Desktop, volveria a pasar.
+# `.venv` dentro del proyecto es un ENLACE a esa ruta, no un directorio: asi
+# `uv run` a secas, sin pasar por make, tambien resuelve fuera de iCloud.
+export UV_PROJECT_ENVIRONMENT ?= $(HOME)/.venvs/ampesm
+
 PY := uv run
 
 help:
@@ -7,7 +22,7 @@ help:
 	@echo "  setup       Crea el entorno con uv e instala dependencias"
 	@echo "  lint        Ejecuta ruff"
 	@echo "  test        Ejecuta pytest"
-	@echo "  check-env   Comprueba que el paquete se importa (P-25)"
+	@echo "  check-env   Comprueba que el paquete se importa (P-25, P-28)"
 	@echo "  data        Descarga y limpia las fuentes -> data/processed/peptides.csv"
 	@echo "  split       Agrupa por identidad de secuencia y divide train/val/test"
 	@echo "  baselines   Entrena composicion y fisicoquimicos (LR, RF, XGBoost)"
@@ -21,6 +36,7 @@ help:
 
 setup:
 	uv sync --extra dev
+	@test -e .venv || ln -s "$(UV_PROJECT_ENVIRONMENT)" .venv
 	$(PY) pre-commit install
 
 lint:
@@ -42,10 +58,23 @@ test:
 check-env:
 	@$(PY) python -c "import ampesm" 2>/dev/null || { \
 	  echo "Error: el paquete 'ampesm' no se importa en este entorno (P-25)."; \
-	  echo "Arreglo:"; \
-	  echo "  uv sync --reinstall-package ampesm"; \
-	  echo "  uv sync --extra dev   # el comando anterior quita las deps de desarrollo"; \
+	  echo "Entorno: $$UV_PROJECT_ENVIRONMENT"; \
+	  dup=$$(find "$$UV_PROJECT_ENVIRONMENT" -name "* [0-9]" -o -name "* [0-9].*" 2>/dev/null | wc -l | tr -d " "); \
+	  if [ "$$dup" -gt 0 ]; then \
+	    echo "Causa: $$dup archivos renombrados por sincronizacion en la nube (P-28)."; \
+	    echo "El entorno esta dentro de una carpeta sincronizada. Muevelo fuera:"; \
+	    echo "  rm -rf \"$$UV_PROJECT_ENVIRONMENT\" && make setup"; \
+	  else \
+	    echo "Arreglo:"; \
+	    echo "  uv sync --reinstall-package ampesm"; \
+	    echo "  uv sync --extra dev   # el comando anterior quita las deps de desarrollo"; \
+	  fi; \
 	  exit 1; }
+	@if [ -d .venv ] && [ ! -L .venv ]; then \
+	  echo "Aviso (P-28): .venv es un directorio real dentro del proyecto, no un"; \
+	  echo "enlace. Funciona hoy, pero iCloud lo corrompera. Reconvertirlo:"; \
+	  echo "  rm -rf .venv && ln -s \"$$UV_PROJECT_ENVIRONMENT\" .venv"; \
+	fi
 
 data: check-env
 	$(PY) ampesm data

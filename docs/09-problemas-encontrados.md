@@ -1378,18 +1378,6 @@ para ellos.
 
 ---
 
-## Plantilla para entradas nuevas
-
-```
-## P-NN — Titulo corto
-**Fecha:** · **Estado:** resuelto | con rodeo | sin resolver
-
-**Sintoma:** que se observo, con el mensaje de error literal si lo hubo.
-**Causa:** la causa real, no la primera hipotesis.
-**Resolucion:** que se cambio, con el archivo y la funcion.
-**Leccion:** que se haria distinto la proxima vez.
-```
-
 ## P-33 — El enlace `.venv` se colo en el commit, y el CI se cayo en 10 segundos
 **Fecha:** 2026-10-17 · **Estado:** RESUELTO
 
@@ -1436,3 +1424,71 @@ forma: `.gitignore`, los globs de las herramientas, los `find -type d`. Y la
 segunda, mas general: el CI es la unica maquina que prueba el repo **como lo
 recibe un tercero**. Que los 145 tests pasen en mi Mac no dice nada sobre si el
 repo se puede clonar, y este proyecto existe en parte para ser clonado.
+
+---
+
+## P-34 — Un test que solo pasa si MMseqs2 esta instalado
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO
+
+**Sintoma:** segundo CI del dia, ya pasada la instalacion:
+
+```
+FAILED tests/test_split.py::TestClusterModeExplicito::test_la_orden_pide_componente_conexa
+  Failed: DID NOT RAISE <class 'RuntimeError'>
+1 failed, 144 passed in 17.41s
+```
+
+En mi Mac los 145 pasan. El test comprueba que la orden de MMseqs2 lleva
+`--cluster-mode 1` (P-29), fingiendo `subprocess.run` para capturar la orden.
+
+**Causa:** `cluster_mmseqs2` empieza con
+
+```python
+if shutil.which("mmseqs") is None:
+    return None
+```
+
+asi que donde no hay binario sale **antes** de llamar a `subprocess`, no se
+construye orden ninguna y el `pytest.raises` no ve su excepcion. El test no
+dependia de MMseqs2 por diseno: dependia de mi `brew install` sin saberlo.
+
+**Resolucion:** fingir tambien la busqueda del binario, que es coherente con lo
+que el propio test dice que comprueba (la orden, no la herramienta):
+
+```python
+monkeypatch.setattr("ampesm.split.shutil.which", lambda _: "/usr/bin/mmseqs")
+```
+
+**Como se valido** (D-15, ejecutando la version mala): se reprodujo la condicion
+del CI en local con un PATH recortado que no contiene `mmseqs`:
+
+```
+VIEJA, sin mmseqs:  1 failed in 0.28s
+NUEVA, sin mmseqs:  1 passed in 0.23s
+suite completa sin mmseqs:  145 passed in 8.18s
+```
+
+Esa ultima linea importa tanto como las otras dos: se corrio **toda** la suite
+sin el binario para ver si habia mas tests con la misma dependencia oculta. No
+los hay.
+
+**Leccion:** un test puede depender de algo que instale a mano hace semanas y
+pasar siempre, en silencio, hasta que lo corre una maquina limpia. Lo mismo que
+P-33 por otra via: el entorno de desarrollo acumula estado que el repositorio no
+declara. Y el procedimiento sirve para la proxima: `PATH` recortado con enlaces
+solo a lo imprescindible, `env -i` para no heredar nada, y correr la suite
+entera, no solo el test que fallo.
+
+---
+
+## Plantilla para entradas nuevas
+
+```
+## P-NN — Titulo corto
+**Fecha:** · **Estado:** resuelto | con rodeo | sin resolver
+
+**Sintoma:** que se observo, con el mensaje de error literal si lo hubo.
+**Causa:** la causa real, no la primera hipotesis.
+**Resolucion:** que se cambio, con el archivo y la funcion.
+**Leccion:** que se haria distinto la proxima vez.
+```

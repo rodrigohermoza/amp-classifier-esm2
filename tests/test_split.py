@@ -599,6 +599,12 @@ class TestClusterModeExplicito:
             capturado["cmd"] = cmd
             raise RuntimeError("corta aqui: solo interesa la orden construida")
 
+        # Sin esto el test pasa en mi Mac y falla en el CI (P-34): la funcion
+        # devuelve None antes de llamar a subprocess si no encuentra el binario,
+        # asi que donde no hay MMseqs2 instalado no se construye orden alguna.
+        # Se finge que esta, porque lo que se comprueba es la orden, no la
+        # herramienta.
+        monkeypatch.setattr("ampesm.split.shutil.which", lambda _: "/usr/bin/mmseqs")
         monkeypatch.setattr("ampesm.split.subprocess.run", falso_run)
         sequences = {"a": "ACDEFGHIKL", "b": "ACDEFGHIKM"}
         with pytest.raises(RuntimeError):

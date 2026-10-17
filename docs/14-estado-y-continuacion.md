@@ -1,37 +1,80 @@
 # Estado del proyecto y como continuar
 
-**Ultima actualizacion: 2026-10-17 (entorno arreglado, `split` corrido cuatro
-veces, agrupamiento corregido dos veces).** Este archivo es el punto de entrada
+**Ultima actualizacion: 2026-10-17, tarde (tuberia completa corrida, resultados
+publicados, reproducibilidad comprobada).** Este archivo es el punto de entrada
 para retomar el trabajo. Lo que esta hecho, lo que falta y lo que hay que decidir.
 
 ---
 
 ## Resumen en una linea
 
-Codigo completo y auditado, publicado en
-<https://github.com/rodrigohermoza/amp-classifier-esm2>. **`data` y `split` ya
-corren con fuentes reales.** La auditoria de fuga de `split` **todavia dice
-`publishable: false`**, y el ultimo diagnostico (P-32) dice que parte de lo que
-marca no es fuga sino un defecto de la propia metrica. **Lo siguiente es aplicar
-el arreglo de P-32, correr `split` una vez mas y, si sale limpio, seguir con
-`baselines` en adelante.** Hay una fase 2 de generacion diseñada y sin
-implementar en [17-diseno-generacion.md](17-diseno-generacion.md).
+**El proyecto tiene resultado.** La tuberia entera corrio sobre datos reales y la
+comparacion preregistrada da un **empate**: ESM-2 35M + logistica frente a
+composicion + fisicoquimicos con XGBoost, diferencia de MCC **+0.008 con IC 95%
+[-0.033, +0.051]**, que incluye el cero. La division lleva fuga por homologia
+**medida y declarada** (no eliminada), y esa declaracion viaja dentro de cada
+JSON de metricas y en el pie de cada figura. Los dos README y `docs/13` ya tienen
+los numeros reales; no queda ningun `[PENDIENTE]`.
+
+Lo siguiente **no es urgente ni bloqueante**. Se puede retomar cuando se quiera.
 
 ---
 
-## Lo que hay que hacer primero al retomar (resumen de 30 segundos)
+## Lo que hay que hacer cuando se retome (resumen de 30 segundos)
 
-1. Aplicar el arreglo propuesto en **P-32**: que la auditoria exija el mismo
-   `min_coverage` que el agrupamiento. Son pocas lineas en
-   `_max_identity_against`, en `src/ampesm/split.py`.
-2. `make split` (12,5 min) y leer `leakage.global_p_value` en **las dos**
-   auditorias y `publishable_reasons`.
-3. Si `publishable` es true, seguir con `baselines` -> `embeddings` -> `train`
-   -> `evaluate` -> `interpret` (~35 min en total).
-4. Si val sigue significativa, **no seguir ajustando**: declararlo en el informe
-   y dejar M-01 (curva de umbral de identidad) como la forma publicable de
-   cerrarlo. Ajustar parametros hasta que el numero salga bien es exactamente el
-   fallo que este repositorio existe para evitar.
+Nada esta a medias. El orden recomendado, de mas a menos valor:
+
+1. **M-01, la curva de rendimiento frente al umbral de identidad.** Es ahora la
+   pieza mas valiosa del proyecto, no un extra: cuantifica cuanto importa la fuga
+   declarada, que es la salvedad que acompaña a todos los numeros. Repetir con
+   umbrales de 0.30, 0.40, 0.50, 0.70 y 0.90 y graficar MCC y ROC-AUC contra
+   umbral. **Coste: 2-3 h**, y los embeddings NO se recalculan (dependen solo de
+   las secuencias, no de la division). Ver la seccion propia mas abajo.
+2. **La residualizacion por longitud** que cerraria del todo la asimetria de
+   D-16 (`docs/10`). Ahora importa menos: la ablacion ya mostro que la longitud
+   no sostenia el baseline (MCC 0.637 -> 0.626, dentro del ruido).
+3. **M-02, evaluacion cruzada por fuente.** `interpret` ya da una pista de que
+   hay señal de procedencia: exactitud 0.872 en APD3 y 0.697 en `uniprot_amp`.
+4. **Fase 2, generacion.** Diseñada y sin implementar en
+   [17-diseno-generacion.md](17-diseno-generacion.md). Es la continuidad con el
+   proyecto de 2023 y la parte mas vistosa para el portafolio.
+5. **M-07 (opcional, con etiqueta).** Fusionar las parejas cortas que MMseqs2 no
+   ve. Solo como analisis de sensibilidad declarado, nunca como resultado: ver
+   D-22 para por que.
+
+Y una cosa que **no** hay que hacer: seguir ajustando el agrupamiento para que
+la fuga baje. Esa decision esta tomada y razonada en D-22.
+
+---
+
+## El resultado, para no tener que buscarlo
+
+**Comparacion preregistrada** (la unica inferencia del proyecto):
+
+| Modelo | ROC-AUC | MCC |
+|---|---|---|
+| comp+fisicoquimicos, XGBoost | 0.909 [0.865-0.943] | 0.637 [0.540-0.716] |
+| ESM-2 35M + logistica | 0.895 [0.838-0.940] | 0.645 [0.543-0.727] |
+
+**Diferencia de MCC +0.008, IC 95% [-0.033, +0.051]: incluye el cero.**
+
+Mejor modelo de los 16 por MCC: ESM-2 35M + MLP, ROC-AUC 0.913, MCC 0.659. Eso
+es **descriptivo, no inferencia** (P-05).
+
+Tres lecturas que no conviene perder:
+
+- **El baseline no era debil**: 0.909 de ROC-AUC con 31 descriptores. La
+  advertencia de `docs/01` se cumplio.
+- **La longitud no era el truco**: la ablacion sin longitud da MCC 0.626 frente
+  a 0.637, dentro del ruido. Eso convierte en numero una advertencia que estaba
+  solo escrita, y hace la comparacion contra ESM-2 mas limpia de lo que se temia.
+- **Los intervalos son anchos (±0.09 en MCC) a proposito**: el bootstrap
+  remuestrea clusteres completos. Con secuencias saldrian estrechos y falsos.
+
+De `interpret`: los falsos positivos tienen carga media +2.03 frente a +0.36 de
+los verdaderos negativos. El modelo se equivoca donde hay carga alta sin
+actividad, que es **exactamente** el fallo que `docs/17` predice para la fase 2
+(la poliarginina). Vale la pena recordarlo al empezar esa fase.
 
 ---
 
@@ -222,12 +265,36 @@ publicado**, asi que se hicieron antes de correr nada:
   cortaba en el primer contenedor (y 803 de 1 582 estan en varios), y el
   reetiquetado permitia que dos fusiones solapadas se sobrescribieran.
 
-Quedan **dos problemas abiertos**:
+- **P-32 / D-21**: la auditoria descartaba la cobertura que el agrupamiento
+  exige, asi que marcaba parejas que no son homologas (`CCISG`, cinco residuos,
+  identidad 1.000 por aritmetica). Al arreglarlo, **el arreglo que estaba
+  escrito no servia**: la cobertura que ya se calculaba se normaliza por la
+  secuencia corta y vale 1.000 justo en los casos malos. La que discrimina es la
+  normalizada por la larga, que es la de MMseqs2. La condicion final es una **O**
+  (cobertura sobre la larga **o** contencion exacta), con un termino por cada
+  garantia que el proyecto afirma.
+- **P-33**: el enlace `.venv` se colo en un commit, porque `.gitignore` decia
+  `.venv/` con barra y la barra solo casa directorios. **El repo no se podia
+  clonar y usar**; el CI se caia en 10 s.
+- **P-34**: un test que solo pasaba con MMseqs2 instalado. El CI lo encontro.
+- **P-35**: el codigo documentaba **al reves** lo que hace `--cov-mode 1`. La
+  frase llevaba semanas ahi y se leyo como premisa al arreglar P-32.
+- **P-36, el mas grave**: dos corridas identicas de `split` daban divisiones
+  distintas. MMseqs2 escribe las filas del TSV en orden variable (es multihilo)
+  y los ids de cluster salian de ese orden, asi que `assign_splits`, que baraja
+  con semilla fija partiendo del orden de los ids, asignaba distinto. **El 35% de
+  las secuencias cambiaba de split entre dos corridas identicas.** Ningun numero
+  anterior era reproducible. Arreglado con ids canonicos y comprobado de punta a
+  punta.
+- **D-22**: `publishable` separa ahora **bloqueos** (nada publicable, `evaluate`
+  aborta) de **salvedades** (se publica declarandolas, y la declaracion va dentro
+  de cada JSON y en el pie de cada figura). Con la puerta anterior, una fuga real
+  y declarada dejaba el proyecto sin producir **ningun** numero, para siempre.
+
+Queda **un solo problema abierto**:
 
 - **P-23**, deliberadamente abierto: no afecta a ningun numero publicable porque
-  MMseqs2 es obligatorio y el respaldo marca `publishable: false`.
-- **P-32**, que es la siguiente tarea: la auditoria descarta la cobertura que el
-  agrupamiento exige, asi que marca parejas que no son homologas.
+  MMseqs2 es obligatorio y el respaldo bloquea la publicacion.
 
 ### 2. `make split` — HECHO, con la fuga declarada (2026-10-17, corrida 7)
 
@@ -274,28 +341,74 @@ comprobarlo sin esperar 12 minutos esta en el script de validacion que se uso:
 pasar dos TSV con ordenes distintos por parseo + fusion + asignacion y comparar
 las divisiones.
 
-### 3. `make baselines`, `make embeddings`, `make train`
-Los pesos de ESM-2 ya estan en cache. Con 18 644 peptidos, los embeddings
-tardaran del orden de 10-20 minutos en CPU para los dos modelos. `baselines`
-entrena ahora **4 representaciones x 3 modelos**, porque D-16 añadio
-`comp_physchem_nolen`.
+### 3. `make baselines`, `make embeddings`, `make train` — HECHO (2026-10-17)
 
-Los tiempos de todas las etapas estan medidos en la tabla de "Coste medido" de
-arriba. `split` tarda 12,5 min con 18 644 peptidos, y las palancas para bajarlo
-(con su coste en calidad) estan ahi mismo.
+Corrido entero. Costes reales medidos en esta corrida, muy por debajo de lo
+estimado porque los pesos y los embeddings ya estaban en cache:
 
-### 4. `make evaluate` y `make interpret`
-Leer `results/metrics/comparison_embeddings_vs_baseline.json`, que es la unica
-inferencia del proyecto. El resto de la tabla es descriptiva.
+| Etapa | Tiempo real |
+|---|---|
+| `baselines` (4 representaciones x 3 modelos) | **39 s** |
+| `embeddings` (los dos modelos, ya en cache) | segundos |
+| `train` (2 modelos ESM-2 x 2 clasificadores) | **30 s** |
+| `evaluate` (16 modelos, bootstrap 2000 por cluster) | **190 s** |
+| `interpret` (UMAP + analisis de errores) | **60 s** |
 
-### 5. Rellenar la documentacion con los resultados
-- Tablas de resultados de `README.md` y `README.en.md` (hoy con guiones).
-- Los `[PENDIENTE]` de `13-portafolio.md`, que son dos: el paso 3 en simple y en
-  tecnico.
-- Actualizar `01-objetivos.md` si la expectativa escrita (margen modesto, quiza
-  intervalos solapados) resulta equivocada. **No reescribir la expectativa para
-  que encaje con el resultado**: esta puesta ahi justamente para poder
-  contrastarla.
+`split` sigue siendo la etapa cara: 12 min en condiciones normales, y se midio
+una corrida de 20 min solo por competencia de CPU con el dibujado de pantalla y
+la app de Claude. **Mas lento no significa distinto** (P-36).
+
+### 4. `make evaluate` y `make interpret` — HECHO (2026-10-17)
+
+El resultado esta arriba, en "El resultado, para no tener que buscarlo". Lo que
+hay en `results/`:
+
+- `metrics/comparison_embeddings_vs_baseline.json` — **la unica inferencia**.
+- `metrics/summary.csv` — los 16 modelos, descriptivo.
+- `metrics/summary_caveats.json` — las salvedades, porque un CSV no tiene donde
+  llevarlas (D-22).
+- `metrics/<modelo>.json` — uno por modelo, cada uno con `split_caveats` dentro.
+- `figures/` — todas con las salvedades en el pie.
+
+**Reproducibilidad comprobada de punta a punta.** Se guardaron los artefactos, se
+relanzo `split` + `baselines` + `train` + `evaluate` y se comparo: `splits.csv` y
+la comparacion preregistrada **identicos byte a byte**; en `summary.csv` una sola
+diferencia de 1.11e-16 en un umbral, que es el ultimo bit de un flotante. Todas
+las metricas coinciden a 12 decimales.
+
+### 5. Rellenar la documentacion — HECHO (2026-10-17)
+
+Los dos README y `13-portafolio.md` tienen los numeros reales. No queda ningun
+`[PENDIENTE]`.
+
+`01-objetivos.md` **no se toco**, y es importante que siga como esta: la
+expectativa escrita ("los embeddings deberian ganar, pero por margen modesto,
+quiza con intervalos solapados") se cumplio, y aun mas conservadora. Si alguna
+vez hay que corregirla, se corrige **declarando que se corrige**, nunca
+reescribiendola para que encaje.
+
+### 5b. M-01, la curva de umbral de identidad — LO SIGUIENTE
+
+Es lo mas valioso que queda, y ya no es un extra: cada metrica publicada va
+acompañada de una salvedad que **remite a esta curva**.
+
+**Que es:** repetir la tuberia con `identity_threshold` en 0.30, 0.40, 0.50,
+0.70 y 0.90, y graficar MCC y ROC-AUC contra el umbral. La pendiente **es** la
+medida directa de cuanta fuga tenia cada division.
+
+**Coste, con los tiempos ya medidos:** por cada umbral, `split` ~12 min +
+`baselines` 39 s + `train` 30 s + `evaluate` 190 s = **~16 min**. Cinco umbrales
+= **80 min de maquina**, mas el codigo para orquestarlo y dibujar la curva.
+Presupuesto realista con margen: **2-3 h**.
+
+**Lo que NO hay que recalcular:** los embeddings. Dependen solo de las
+secuencias, no de la division, y ya estan en cache. Caer en recalcularlos
+multiplicaria el coste sin cambiar un numero.
+
+**Que mirar al terminar:** si la curva baja al subir el umbral, la fuga era real
+y esta cuantificada. Si es plana, el modelo no dependia de la homologia tanto
+como se temia, y eso tambien es un resultado publicable. Las dos salidas sirven;
+ninguna obliga a retocar nada.
 
 ### 6. Fase 2: generacion de peptidos
 Diseñada y aprobada, sin implementar. Todo en
@@ -345,9 +458,17 @@ validar la deriva de la tasa positiva) **estan hechos**: P-27 y P-26.
 - *El confusor de longitud* (punto 4 de la lista anterior): ablacion, no
   emparejado por split. Razonamiento completo en D-16.
 
-**Abierta:**
+**Abiertas:**
 
-1. **¿Se hace la regresion de MIC con los MIC de DRAMP?** El reexamen de P-02
+1. **Lo de GitHub, pendiente de Rodrigo y no de nadie mas.** La descripcion del
+   repositorio todavia describe **otro proyecto**: habla de generar peptidos
+   para agricultura. Con el README ya con resultados, desentona mas. Se cambia
+   desde la propia pagina del repo, en el engranaje de "About".
+2. **El nombre del repositorio cuando llegue la fase 2.** `amp-classifier-esm2`
+   describe bien la mitad actual y se quedara corto cuando haya generacion.
+   Cambiar el nombre en GitHub mantiene las redirecciones, asi que no rompe
+   enlaces, pero conviene decidirlo antes de que haya mucho enlazado.
+3. **¿Se hace la regresion de MIC con los MIC de DRAMP?** El reexamen de P-02
    cambia el planteamiento: DBAASP no cambio de dominio, su portada responde y
    lo que esta roto es todo lo que devuelve datos (200 con 0 bytes, incluida la
    documentacion de su API). Pero **DRAMP trae MIC en 5 020 de sus 12 784
@@ -399,16 +520,24 @@ no instale ~60 MB de babel y jedi.
 5. **La ablacion de D-16 es asimetrica**: quita la longitud al baseline y no a
    ESM-2, asi que esa lectura esta sesgada a favor de los embeddings. Por eso
    la comparacion preregistrada sigue siendo contra `comp_physchem` completo.
-6. **Las etapas 3 a 7 nunca se han ejecutado con datos reales.** `split` ya
-   si, cuatro veces.
-7. **La division todavia no esta limpia.** `publishable: false` con fuga
-   significativa en val. Diagnosticado (P-32) y con arreglo propuesto, pero
-   mientras siga asi **ninguna metrica de test es publicable**, y esa es
-   precisamente la funcion del campo.
-8. **La metrica de identidad no sirve para peptidos de 5-7 residuos**, y hay 536
-   en el conjunto. Un alineador global con huecos da identidad 1.00 entre
-   `CCISG` y cualquier peptido rico en cisteina. Afecta a la auditoria, no al
-   clasificador, pero contamina el p-valor de fuga (P-32).
+6. ~~Las etapas 3 a 7 nunca se han ejecutado con datos reales.~~ **Cerrado el
+   2026-10-17**: la tuberia completa corrio, dos veces, con el mismo resultado.
+7. **La division tiene fuga por homologia real, medida y declarada.** Test
+   +54.2 y val +65.2 sobre 23.81 esperadas por azar, ambas p = 0. No bloquea
+   publicar (D-22), **pero ninguna metrica de este proyecto se cita sin ella**.
+   La via para cerrarla es M-01, no mas ajustes. Entre el 74% y el 86% de lo
+   marcado tiene identidad >= 0.60 con un pariente en train: es homologia, no
+   artefacto de la metrica.
+8. **La fuga se concentra en peptidos cortos y ahi MMseqs2 no puede verla.** Su
+   prefiltro necesita 6-7 k-meros coincidentes y un peptido de 8 residuos tiene
+   dos o tres. No es configuracion, es estructural. La fusion por contencion
+   (D-20) tapa las subcadenas exactas; las sustituciones de un residuo
+   (`ILGKIWKGIKSLF` vs `ILGKIWKIKKLF`) siguen cruzando. Cerrarlas requiere
+   M-07, que no puede ser resultado principal (D-22).
+8b. **Las cifras de fuga anteriores al 2026-10-17 no son comparables con las de
+   despues**, por dos motivos acumulados: cambio lo que se mide (P-32) y hasta
+   P-36 dos corridas identicas daban divisiones distintas. La tabla de las siete
+   corridas lo marca; **no se puede citar como una progresion**.
 9. **El proyecto vive en una carpeta sincronizada por iCloud.** El entorno ya
    esta fuera (D-19) y hoy no hay dano en `src/`, `docs/` ni `.git` —medido, 0
    archivos afectados— pero no hay garantia de que iCloud no toque algo mas
@@ -452,10 +581,38 @@ encuentre**, antes de creerte el numero que te devuelve.
 Y una distincion que conviene no perder, porque es la parte fina de todo esto:
 **compartir la definicion no es compartir la regla.** La guarda y lo vigilado
 tienen que estar de acuerdo en *que cuenta como homologo* (identidad y
-cobertura), o la guarda mide otra cosa que lo garantizado — eso es P-32 y hay que
-arreglarlo. Pero no deben usar *el mismo alineador*, porque entonces la guarda
-hereda sus puntos ciegos y no puede contradecirlo — eso es D-20 y hay que
-evitarlo.
+cobertura), o la guarda mide otra cosa que lo garantizado — eso era P-32. Pero no
+deben usar *el mismo alineador*, porque entonces la guarda hereda sus puntos
+ciegos y no puede contradecirlo — eso es D-20. La primera igualdad es
+obligatoria; la segunda, inadmisible.
+
+**De la tarde del 17 de octubre**, cinco mas, todas pagadas:
+
+5. **Lo que no se mide, no se arregla aunque se escriba el arreglo.** El arreglo
+   de P-32 llevaba un dia escrito en los docs y **no servia**: al medirlo antes
+   de implementarlo, la cobertura que proponia exigir valia 1.000 justo en los
+   casos que lo motivaban. Un arreglo razonado sigue siendo una hipotesis.
+6. **La documentacion que miente es peor que la que falta**, porque se usa para
+   decidir. El docstring de `--cov-mode 1` decia lo contrario de lo que hace
+   (P-35), y se leyo como premisa. Un comentario que explica por que un
+   parametro vale lo que vale es una afirmacion comprobable, y se comprueba.
+7. **Un test que estorba puede estar defendiendo algo.** El filtro de cobertura
+   rompio la regresion de P-14. La pregunta correcta no era si borrarlo, sino
+   **que garantia defendia**, y la respuesta cambio el diseño: la condicion paso
+   a ser una O con un termino por mecanismo (D-21).
+8. **El orden es la tercera forma del mismo fallo.** P-14 (una cota mal puesta),
+   P-31 (iteracion de un `set`) y P-36 (el orden de las filas de un TSV). La
+   pregunta que los detecta: *¿alguien lee esto en orden, y ese orden decide
+   algo?* En P-36 el lector era un `rng.shuffle` tres funciones mas abajo.
+9. **El CI es la unica maquina que prueba el repo como lo recibe un tercero.**
+   Dos fallos del dia (P-33, P-34) pasaban los 145 tests en local y hacian que el
+   repositorio **no se pudiera clonar y usar**. Para un repo cuyo proposito es
+   que lo lean otros, eso no es un detalle de infraestructura.
+
+Y la que resume la sesion entera: **relanzar algo que no tenia por que cambiar y
+comparar el resultado** encontro el fallo mas grave del dia (P-36). No lo
+encontro ningun test ni ninguna lectura del codigo. Conviene hacerlo a proposito
+de vez en cuando.
 
 ## Reglas de trabajo acordadas
 

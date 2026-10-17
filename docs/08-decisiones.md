@@ -404,8 +404,14 @@ defecto a `~/.venvs/ampesm` y `.venv` es un enlace. Es un `?=`, asi que
 cualquiera puede sobreescribirlo; en un sistema sin sincronizacion en la nube la
 decision es irrelevante y no molesta.
 
-**Relacionado:** P-28, P-13, P-25, D-15 (el caso plantado que no reproducia el
-mecanismo real), D-18 (el aviso de `.venv` real avisa y no aborta).
+**El enlace no se versiona.** `.venv` es un enlace a una ruta de **mi** maquina,
+asi que en el repositorio no sirve de nada y rompe el CI: se colo en un commit y
+el primer CI murio en 10 s (P-33). El `.gitignore` lleva `.venv` sin barra final,
+que es lo que ignora tanto el directorio como el enlace. Quien clone el repo lo
+obtiene con `make setup`, que lo crea si falta.
+
+**Relacionado:** P-28, P-33, P-13, P-25, D-15 (el caso plantado que no reproducia
+el mecanismo real), D-18 (el aviso de `.venv` real avisa y no aborta).
 
 ---
 

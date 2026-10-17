@@ -1389,3 +1389,50 @@ para ellos.
 **Resolucion:** que se cambio, con el archivo y la funcion.
 **Leccion:** que se haria distinto la proxima vez.
 ```
+
+## P-33 — El enlace `.venv` se colo en el commit, y el CI se cayo en 10 segundos
+**Fecha:** 2026-10-17 · **Estado:** RESUELTO
+
+**Sintoma:** el primer CI tras los arreglos del 17 de octubre fallo en 10 s, antes
+de ejecutar un solo test:
+
+```
+Creating virtual environment at: .venv
+error: failed to create directory `/home/runner/work/amp-classifier-esm2/amp-classifier-esm2/.venv`: File exists (os error 17)
+```
+
+**Causa:** el arreglo de P-28 (D-19) crea `.venv` como **enlace simbolico** a
+`~/.venvs/ampesm`. El `.gitignore` decia `.venv/`, **con barra final**, y en git
+esa barra significa "solo si es un directorio". Un enlace no es un directorio, asi
+que la regla no lo cubrio, `git add` lo recogio y quedo versionado como modo
+`120000`. En el CI el checkout materializa ese enlace apuntando a un
+`/home/runner/.venvs/ampesm` que no existe en el runner, y `uv sync` se encuentra
+`.venv` ya presente y se niega a crearlo.
+
+Es decir: el arreglo de un problema del entorno creo otro, porque cambio la
+*naturaleza* del archivo (directorio -> enlace) y la regla de ignorado estaba
+escrita para la naturaleza vieja.
+
+**Arreglo:**
+
+```bash
+git rm --cached .venv     # saca del indice, NO borra el enlace local
+```
+
+y en `.gitignore`, `.venv/` -> `.venv` (sin barra ignora directorio y enlace).
+
+**Comprobado antes de dar por bueno** (D-15, con el caso plantado ejecutando
+tambien la version mala):
+
+```
+regla vieja (.venv/):  NO lo ignora -> se commitearia
+regla nueva (.venv):   .gitignore:1:.venv  .venv  -> lo ignora
+```
+
+**Leccion:** una regla de ignorado puede ser correcta para el caso que se escribio
+y ciega para el que aparece despues. Cuando un arreglo cambia *que tipo de cosa*
+es un archivo, hay que volver a mirar todo lo que decide sobre ese archivo por su
+forma: `.gitignore`, los globs de las herramientas, los `find -type d`. Y la
+segunda, mas general: el CI es la unica maquina que prueba el repo **como lo
+recibe un tercero**. Que los 145 tests pasen en mi Mac no dice nada sobre si el
+repo se puede clonar, y este proyecto existe en parte para ser clonado.
